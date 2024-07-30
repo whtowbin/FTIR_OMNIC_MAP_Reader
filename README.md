@@ -44,9 +44,9 @@ To install:
  ```
 
  The map should contain the three main attributes
-     data_vars: This is all of the spectra in the map
-     coords: These are the spatial and spectral coordiantes of the map
-     attrs: this is all of the meta data reported in the .MAP file
+   - data_vars: This is all of the spectra in the map
+   - coords: These are the spatial and spectral coordiantes of the map
+   - attrs: this is all of the meta data reported in the .MAP file
 
  You can export this data to other formats if you find those easier to work with. I eventually hope to provide further guidance for processing the map files efficiently using xarray. 
 
