@@ -17,20 +17,20 @@ pip install ftir-map
 ``` -->
 
 
-This code aims to provide a convenient interface for reading FTIR Data specifically OMNIC .MAP files. It loads OMNIC .MAP files into python as Xarray dataset objects. This provides access to the coordiantes and spectra of each point in the map. 
+This code aims to provide a convenient interface for reading FTIR Data specifically OMNIC .MAP files. It loads OMNIC .MAP files into python as Xarray dataset objects. This provides access to the coordinates and spectra of each point in the map. 
 
 The underlying code for reading OMINC .MAP files was part of the python package [PyMca](https://github.com/vasole/pymca?tab=readme-ov-file) X-Ray Fluorescence Toolkit. Developed by the European Synchrotron Radiation Facility.
 
 
 ## Installation 
 
-You will already need to have a python environemnt installed on your computer to install this software. 
+You will already need to have a python environment installed on your computer to install this software. 
 
 To install:
-1) Download or clone this respository to your computer and save it in a location where it can remain on your computer. 
+1) Download or clone this repository to your computer and save it in a location where it can remain on your computer. 
 2) In the terminal navigate to the directory of the package.
 3) run the command:
-   -  python -m pip install .
+   - python -m pip install .
    - if you have windows you might need to run: python3 -m pip install .
 
 ## Directions
@@ -43,12 +43,16 @@ To install:
  map = omnic.Load_Omnic_Map(map_path)
  ```
 
- The map should contain the three main attributes
+ The map is an xarray [dataset](https://docs.xarray.dev/en/stable/generated/xarray.Dataset.html) object. It should contain the three main attributes
    - data_vars: This is all of the spectra in the map
-   - coords: These are the spatial and spectral coordiantes of the map
+   - coords: These are the spatial and spectral coordinates of the map
    - attrs: this is all of the meta data reported in the .MAP file
 
- You can export this data to other formats if you find those easier to work with. I eventually hope to provide further guidance for processing the map files efficiently using xarray. 
+If you are unfamiliar with recommend looking at the xarray [tutorial](https://tutorial.xarray.dev/overview/xarray-in-45-min)
+
+The main benefit of xarray is that it is straightforward to reference the data by spatial and spectral coordinates in the appropriate units. If you choose not to use it you should be able to access the underlying data as numpy arrays. 
+
+I eventually hope to provide further guidance for processing the map files efficiently using xarray. 
 
 ## License
 
