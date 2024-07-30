@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ftir-map"
+dynamic = ["version"]
+description = ''
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Henry Towbin", email = "24940778+whtowbin@users.noreply.github.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+]
+dependencies = ["numpy >= 1.26","xarray>=2024.6"]
+
+[project.urls]
+Documentation = "https://github.com/Henry Towbin/ftir-map#readme"
+Issues = "https://github.com/Henry Towbin/ftir-map/issues"
+Source = "https://github.com/Henry Towbin/ftir-map"
+
+[tool.hatch.version]
+path = "src/ftir_map/__about__.py"
+
+
+[tool.hatch.build.targets.wheel]
+only-include = ["src/ftir_map"]
+
+[tool.hatch.build.sources]
+"src/ftir_map" = "ftir_map"
