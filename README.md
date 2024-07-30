@@ -53,4 +53,3 @@ To install:
 ## License
 
 `ftir-map` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
-# FTIR_OMNIC_MAP_Reader
