@@ -19,7 +19,7 @@ pip install ftir-map
 
 This code aims to provide a convenient interface for reading FTIR Data specifically OMNIC .MAP files. It loads OMNIC .MAP files into python as Xarray dataset objects. This provides access to the coordiantes and spectra of each point in the map. 
 
-The underlying code for reading OMINC .MAP files was part of the python package [PyMca](https://github.com/vasole/pymca?tab=readme-ov-file) X-Ray Fluorescence Toolkit. Developed by the European Synchrotron Radiation Facility
+The underlying code for reading OMINC .MAP files was part of the python package [PyMca](https://github.com/vasole/pymca?tab=readme-ov-file) X-Ray Fluorescence Toolkit. Developed by the European Synchrotron Radiation Facility.
 
 
 ## Installation 
@@ -31,7 +31,7 @@ To install:
 2) In the terminal navigate to the directory of the package.
 3) run the command:
    -  python -m pip install .
-    if you have windows you might need to run python3 -m pip install .
+   - if you have windows you might need to run: python3 -m pip install .
 
 ## Directions
  To load a map follow this example. 
