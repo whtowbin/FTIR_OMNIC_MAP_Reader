@@ -21,7 +21,7 @@ This code aims to provide a convenient interface for reading FTIR Data specifica
 
 The underlying code for reading OMINC .MAP files was part of the python package [PyMca](https://github.com/vasole/pymca?tab=readme-ov-file) X-Ray Fluorescence Toolkit. Developed by the European Synchrotron Radiation Facility.
 
-If there is interest in my adding particular features please let me know in the issues or make a pull request with the change. 
+If there is interest in adding particular features please let me know in the issues or make a pull request with the change. 
 
 
 ## Installation 
