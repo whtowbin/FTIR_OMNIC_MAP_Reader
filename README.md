@@ -1,4 +1,4 @@
-# FTIR Map
+# FTIR OMNIC Map Reader
 <!-- 
 [![PyPI - Version](https://img.shields.io/pypi/v/ftir-map.svg)](https://pypi.org/project/ftir-map)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ftir-map.svg)](https://pypi.org/project/ftir-map)
@@ -20,6 +20,8 @@ pip install ftir-map
 This code aims to provide a convenient interface for reading FTIR Data specifically OMNIC .MAP files. It loads OMNIC .MAP files into python as Xarray dataset objects. This provides access to the coordinates and spectra of each point in the map. 
 
 The underlying code for reading OMINC .MAP files was part of the python package [PyMca](https://github.com/vasole/pymca?tab=readme-ov-file) X-Ray Fluorescence Toolkit. Developed by the European Synchrotron Radiation Facility.
+
+If there is interest in my adding particular features please let me know in the issues or make a pull request with the change. 
 
 
 ## Installation 
