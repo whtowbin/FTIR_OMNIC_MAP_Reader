@@ -21,7 +21,12 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: Implementation :: CPython",
 ]
-dependencies = ["numpy >= 1.26","xarray>=2024.6"]
+dependencies = [
+    "ipykernel>=6.29.5",
+    "matplotlib>=3.10.1",
+    "numpy >= 1.26",
+    "xarray>=2024.6",
+]
 
 [project.urls]
 Documentation = "https://github.com/Henry Towbin/ftir-map#readme"
