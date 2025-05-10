@@ -218,6 +218,7 @@ class OmnicMap(DataObject):
         self.yPositions = yPositions
         self.x_list = x_list
         self.y_list = y_list
+        self.pixelNumber_list = numpy.array(pixelNumber_list)
 
         _logger.debug(
             "DIMENSIONS X = %f Y=%d", self.nSpectra * 1.0 / self.nRows, self.nRows
@@ -401,65 +402,8 @@ class OmnicMap(DataObject):
         deltaX = ddict["Mapping stage X step size"]
         deltaY = ddict["Mapping stage Y step size"]
         nX = int(1.5 + ((x1 - x0) / deltaX))
+        nY = int(1.5 + ((y1 - y0) / deltaY))
         x = x0 + (index % nX) * deltaX
         y = y0 + int(index / nX) * deltaY
+
         return x, y
-
-        # test points    
-        # self.tmpValues = tmpValues
-        # self.s = s
-        # self.pixelNumber = pixelNumber
-        # self.data = data
-
-def Load_Omnic_Map(dir_path: str):
-
-    mapfile = OmnicMap(dir_path)
-    wn0 = mapfile.info["OmnicInfo"]['First X value'] # cm^-1
-    wn1 = mapfile.info["OmnicInfo"]['Last X value'] # cm^-1
-
-    unique_x = numpy.unique(mapfile.info["positioners"]["X"])
-    unique_y = numpy.unique(mapfile.info["positioners"]["Y"])
-
-    x_coords = unique_x - unique_x[0] #µm
-    y_coords = unique_y - unique_y[0] #µm
-
-    len_wn = mapfile.data.shape[2]
-    wn  = numpy.linspace(wn0, wn1, len_wn) #cm^-1
-
-    unit_names = {"x": "um", "y": "um", "wn": "cm^-1", "data": "absorbance"}
-    unit_long_names = {"x": "microns", "y": "microns", "wn": "wavenumbers", "data": "absorbance"}
-    metadata = {"unit_names": unit_names, "unit_long_names": unit_long_names, **mapfile.info}
-
-
-    # DataArray = xr.DataArray(
-    #     mapfile.data,
-    #     dims=("y", "x", "wn"),
-    #     coords={"y": y_coords, "x": x_coords, "wn": wn},
-    #     attrs= metadata
-    # )
-    #This probably needs to be a dataset to work with previous functions. or they need to be made to arrays
-
-    data = {"spectra": (["y", "x", "wn"], mapfile.data)}
-
-    coords = {
-        "x": x_coords,
-        "y": y_coords,
-        "wn": wn,
-    }
-
-    dataset = xr.Dataset(
-        data_vars= data,
-        coords= coords,
-        attrs= metadata
-    )
-
-    return dataset #DataArray
-#%%
-map_path = "/Users/henrytowbin/Projects/FTIR_MAP_Test/Bergell_megacryst_2025_5_6_13_41_15.map"
-
-
-mapdata = OmnicMap(map_path)
-# mapdata = Load_Omnic_Map(map_path)
-
-
-# %%
