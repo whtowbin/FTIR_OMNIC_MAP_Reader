@@ -1,21 +1,13 @@
 # FTIR OMNIC Map Reader
-<!-- 
-[![PyPI - Version](https://img.shields.io/pypi/v/ftir-map.svg)](https://pypi.org/project/ftir-map)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ftir-map.svg)](https://pypi.org/project/ftir-map)
-
------
 
 ## Table of Contents
 
+- [Description](#description)
 - [Installation](#installation)
+- [Directions](#directions)
 - [License](#license)
 
-## Installation
-
-```console
-pip install ftir-map
-``` -->
-
+## Description
 
 This code aims to provide a convenient interface for reading FTIR Data specifically OMNIC .MAP files. It loads OMNIC .MAP files into python as Xarray dataset objects. This provides access to the coordinates and spectra of each point in the map. 
 
@@ -23,12 +15,25 @@ The underlying code for reading OMINC .MAP files was part of the python package 
 
 If there is interest in adding particular features please let me know in the issues or make a pull request with the change. 
 
-
 ## Installation 
 
 You will already need to have a python environment installed on your computer to install this software. 
+If you do not have a python environment installed you can use [UV](https://docs.astral.sh/uv/) to install one.
 
-To install:
+To install this package you can use pip. 
+
+```console
+pip install ftir-OMNIC-map-reader
+```
+
+If you are using [UV](https://docs.astral.sh/uv/) to manage your python environment you can install the package by running the command:
+
+```console
+uv add ftir-OMNIC-map-reader
+```
+
+if you are 
+If you would like to install the package from source you can do so by following these steps:
 1) Download or clone this repository to your computer and save it in a location where it can remain on your computer. 
 2) In the terminal navigate to the directory of the package.
 3) run the command:
@@ -58,4 +63,4 @@ I eventually hope to provide further guidance for processing the map files effic
 
 ## License
 
-`ftir-map` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
+`FTIR OMNIC Map Reader` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.

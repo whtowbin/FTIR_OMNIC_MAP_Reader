@@ -1,0 +1,15 @@
+LICENSE.txt
+README.md
+pyproject.toml
+src/ftir_OMNIC_map_reader.egg-info/PKG-INFO
+src/ftir_OMNIC_map_reader.egg-info/SOURCES.txt
+src/ftir_OMNIC_map_reader.egg-info/dependency_links.txt
+src/ftir_OMNIC_map_reader.egg-info/requires.txt
+src/ftir_OMNIC_map_reader.egg-info/top_level.txt
+src/ftir_map/LoadOmnicArrayMAP.py
+src/ftir_map/LoadOmnicMAP.py
+src/ftir_map/PyMca_Array_OmnicMap.py
+src/ftir_map/PyMca_OmnicMap.py
+src/ftir_map/__about__.py
+src/ftir_map/__init__.py
+src/ftir_map/testpoint.py
