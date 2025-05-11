@@ -116,12 +116,10 @@ class OmnicArrayMap(DataObject):
             
         byteAnchor = data.index(searchedChain1)
         firstByte = byteAnchor - (100-data[byteAnchor-100:byteAnchor+100].index(searchedChain2))
-        print(f"firstByte = {firstByte}")
         s = data[firstByte : (firstByte + 100 - 16)]
         
         if sys.version >= "3.0":
             s = str(s)
-            print(s)
         _logger.debug("firstByte = %d", firstByte)
 
         _logger.debug("s1 = %s ", s)
@@ -191,7 +189,6 @@ class OmnicArrayMap(DataObject):
                 #%%
                 tmpValues = exp.findall(s)
                 pixelNumber = int(tmpValues[0])
-                print(s)
                 if ", XPos=" in s:
                     xPosition = float(tmpValues[3])
                     yPosition = float(tmpValues[4])
@@ -231,10 +228,7 @@ class OmnicArrayMap(DataObject):
         self.x_list = x_list
         self.y_list = y_list
         self.pixelNumber_list = numpy.array(pixelNumber_list)
-        print(f"len(xPositions) = {len(numpy.unique(xPositions))}")
-        print(f"len(yPositions) = {len(numpy.unique(yPositions))}")
-        print(f'i = {i}')
-        print(f'nrows = {self.nRows}')
+
         _logger.debug(
             "DIMENSIONS X = %f Y=%d", self.nSpectra * 1.0 / self.nRows, self.nRows
         )
@@ -256,16 +250,12 @@ class OmnicArrayMap(DataObject):
         self.__nImagesPerFile = 1
         offset = firstByte - 16 + 100  # starting position of the data
         delta = 100 + self.nChannels * 4
-        print("delta = %d", delta)
         fmt = "%df" % self.nChannels
-        print(fmt)
         for i in range(self.__nFiles):
             for j in range(self.nRows):
                 # this approach is inneficient when compared to a direct
                 # data readout, but it allows to deal with nan at the source
                 tmpData = numpy.zeros((self.nChannels,), dtype=numpy.float32)
-                print(f'len(data) = {len(data[offset : (offset + delta - 100)])}')
-                print(f'i = {i}, j = {j}, offset = {offset}')
                 tmpData[:] = struct.unpack(fmt, data[offset : (offset + delta - 100)])
                 finiteData = numpy.isfinite(tmpData)
                 self.data[i, j, finiteData] = tmpData[finiteData]
