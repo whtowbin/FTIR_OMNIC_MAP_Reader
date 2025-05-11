@@ -117,17 +117,19 @@ class OmnicArrayMap(DataObject):
         byteAnchor = data.index(searchedChain1)
         firstByte = byteAnchor - (100-data[byteAnchor-100:byteAnchor+100].index(searchedChain2))
         s = data[firstByte : (firstByte + 100 - 16)]
+        
         if sys.version >= "3.0":
             s = str(s)
         _logger.debug("firstByte = %d", firstByte)
+
         _logger.debug("s1 = %s ", s)
         exp = re.compile(r"(-?[0-9]+\.?[0-9]*)")
         tmpValues = exp.findall(s)
         pixelNumber = int(tmpValues[0])
         # self.nSpectra = int(tmpValues[1]) # this doesnt exist in the array detector format
         # if "XPos = " in s:
-        xPosition = float(tmpValues[1])
-        yPosition = float(tmpValues[2])
+        xPosition = float(tmpValues[3])
+        yPosition = float(tmpValues[4])
         X_um = float(tmpValues[3])
         Y_um = float(tmpValues[4])
         
@@ -174,38 +176,45 @@ class OmnicArrayMap(DataObject):
         # Length of spectral data is not known
         # so I have to read until the end of the file
         # or until I find a problem
-        while offset < len(data):
+        data_continues =True
+        while offset < len(data) and data_continues:
             try:
                 offset = int(firstByte + i * (100 + self.nChannels * 4))
                 if sys.version < "3.0":
                     s = data[offset : (offset + 100 - 16)]
                 else:
                     s = str(data[offset : (offset + 100 - 16)])
+                
+
+                #%%
                 tmpValues = exp.findall(s)
                 pixelNumber = int(tmpValues[0])
-                if "XPos = " in s:
-                    xPosition = float(tmpValues[1])
-                    yPosition = float(tmpValues[2])
+                if ", XPos=" in s:
+                    xPosition = float(tmpValues[3])
+                    yPosition = float(tmpValues[4])
                     X_um = float(tmpValues[3])
                     Y_um = float(tmpValues[4])
-                else:
-                    # I have to calculate them from the scan
-                    xPosition, yPosition = self.getPositionFromIndexAndInfo(i, omnicInfo)
-                xPosition_list.append(xPosition)
-                yPosition_list.append(yPosition)
-                x_list.append(X_um)
-                y_list.append(Y_um)
-                pixelNumber_list.append(pixelNumber)
+                    # else:
+                    #     # I have to calculate them from the scan
+                    #     xPosition, yPosition = self.getPositionFromIndexAndInfo(i, omnicInfo)
+                    xPosition_list.append(xPosition)
+                    yPosition_list.append(yPosition)
+                    x_list.append(X_um)
+                    y_list.append(Y_um)
+                    pixelNumber_list.append(pixelNumber)
 
-                i += 1
+                    i += 1
 
-                if calculating:
-                    if (abs(yPosition - oldYPosition) > 1.0e-6) and (
-                        abs(xPosition - oldXPosition) < 1.0e-6
-                    ):
-                        calculating = False
-                        continue
-                    self.nRows += 1
+                    if calculating:
+                        if (abs(yPosition - oldYPosition) > 1.0e-6) and (
+                            abs(xPosition - oldXPosition) < 1.0e-6
+                        ):
+                            calculating = False
+                            continue
+                        self.nRows += 1
+                if ", XPos=" not in s:
+                    data_continues = False
+
             except Exception:
                 break
 
@@ -407,3 +416,4 @@ class OmnicArrayMap(DataObject):
         y = y0 + int(index / nX) * deltaY
 
         return x, y
+# %%

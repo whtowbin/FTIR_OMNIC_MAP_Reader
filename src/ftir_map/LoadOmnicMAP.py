@@ -24,6 +24,7 @@ def Load_Omnic_Map(dir_path: str):
         print("Trying to load as OmnicArrayMap...")
         try:
             mapfile = PyMca_Array_OmnicMap.OmnicArrayMap(dir_path)
+            print("Loaded as OmnicArrayMap.")
         except Exception as e:
             print(f"Error loading map file as OmnicArrayMap: {e}")
             print("Unable to load the file.")
