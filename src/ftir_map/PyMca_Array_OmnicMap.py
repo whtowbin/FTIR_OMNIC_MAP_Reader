@@ -130,13 +130,8 @@ class OmnicArrayMap(DataObject):
         # if "XPos = " in s:
         xPosition = float(tmpValues[3])
         yPosition = float(tmpValues[4])
-<<<<<<< HEAD
         X_um = float(tmpValues[3])
         Y_um = float(tmpValues[4])
-=======
-        # X_um = float(tmpValues[3])
-        # Y_um = float(tmpValues[4])
->>>>>>> 431bf74 (Load message for Array detector changed)
         
         # else:
         #     # I have to calculate them from the scan
@@ -166,13 +161,8 @@ class OmnicArrayMap(DataObject):
         self.nRows = 0
         xPosition_list = []
         yPosition_list = []
-<<<<<<< HEAD
         x_list = []
         y_list = []
-=======
-        # x_list = []
-        # y_list = []
->>>>>>> 431bf74 (Load message for Array detector changed)
         pixelNumber_list = []
 
         # xPositions = numpy.zeros(self.nSpectra)
@@ -202,25 +192,15 @@ class OmnicArrayMap(DataObject):
                 if ", XPos=" in s:
                     xPosition = float(tmpValues[3])
                     yPosition = float(tmpValues[4])
-<<<<<<< HEAD
                     X_um = float(tmpValues[3])
                     Y_um = float(tmpValues[4])
-=======
-                    # X_um = float(tmpValues[3])
-                    # Y_um = float(tmpValues[4])
->>>>>>> 431bf74 (Load message for Array detector changed)
                     # else:
                     #     # I have to calculate them from the scan
                     #     xPosition, yPosition = self.getPositionFromIndexAndInfo(i, omnicInfo)
                     xPosition_list.append(xPosition)
                     yPosition_list.append(yPosition)
-<<<<<<< HEAD
                     x_list.append(X_um)
                     y_list.append(Y_um)
-=======
-                    # x_list.append(X_um)
-                    # y_list.append(Y_um)
->>>>>>> 431bf74 (Load message for Array detector changed)
                     pixelNumber_list.append(pixelNumber)
 
                     i += 1
@@ -241,21 +221,12 @@ class OmnicArrayMap(DataObject):
         self.nSpectra = i
         xPositions = numpy.array(xPosition_list)
         yPositions = numpy.array(yPosition_list)
-<<<<<<< HEAD
         x_list = numpy.array(x_list)
         y_list = numpy.array(y_list)
         self.xPositions = xPositions
         self.yPositions = yPositions
         self.x_list = x_list
         self.y_list = y_list
-=======
-        # x_list = numpy.array(x_list)
-        # y_list = numpy.array(y_list)
-        self.xPositions = xPositions
-        self.yPositions = yPositions
-        # self.x_list = x_list
-        # self.y_list = y_list
->>>>>>> 431bf74 (Load message for Array detector changed)
         self.pixelNumber_list = numpy.array(pixelNumber_list)
 
         _logger.debug(

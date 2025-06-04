@@ -41,6 +41,8 @@ If you would like to install the package from source you can do so by following 
    - if you have windows you might need to run: python3 -m pip install .
 
 ## Directions
+
+### Xarray Dataset
  To load a map follow this example. 
 
  ``` python
@@ -48,18 +50,35 @@ If you would like to install the package from source you can do so by following 
 
  map_path = "greatest_map_ever.map"
  map = omnic.Load_Omnic_Map(map_path)
+ spectra = map['spectra']  # This is the spectra data
+ coordinates = map.coords  # This contains the spatial and spectral coordinates
+ metadata = map.attrs  # This contains the metadata from the .MAP file
  ```
 
  The map is an xarray [dataset](https://docs.xarray.dev/en/stable/generated/xarray.Dataset.html) object. It should contain the three main attributes
    - data_vars: This is all of the spectra in the map
    - coords: These are the spatial and spectral coordinates of the map
    - attrs: this is all of the meta data reported in the .MAP file
+   
+   If you are unfamiliar with recommend looking at the xarray [tutorial](https://tutorial.xarray.dev/overview/xarray-in-45-min)
+   
+   The main benefit of xarray is that it is straightforward to reference the data by spatial and spectral coordinates in the appropriate units. If you choose not to use it you should be able to access the underlying data as numpy arrays. 
+   
+   I eventually hope to provide further guidance for processing the map files efficiently using xarray. 
 
-If you are unfamiliar with recommend looking at the xarray [tutorial](https://tutorial.xarray.dev/overview/xarray-in-45-min)
+   ### Data as a Dictionary
+   If you would like to access the data as a dictionary containing the spectra data, spatial and spectral coordiantes, and metadata; you can do so b
 
-The main benefit of xarray is that it is straightforward to reference the data by spatial and spectral coordinates in the appropriate units. If you choose not to use it you should be able to access the underlying data as numpy arrays. 
-
-I eventually hope to provide further guidance for processing the map files efficiently using xarray. 
+    ``` python
+    from ftir_map  import LoadOmnicMAP as omnic
+    map_path = "greatest_map_ever.map"
+    map_dict = omnic.Load_Omnic_Map_as_dict(map_path)
+    spectra = map_dict['data']  # This is the spectra data
+    x_coordinates = map_dict['x'] # This contains the x spatial coordinates
+    y_coordinates = map_dict['y'] # This contains the y spatial coordinates
+    wn_coordinates = map_dict['wn'] # This contains the spectral coordinates
+    metadata = map_dict['metadata']  # This contains the metadata from the .MAP file
+    ```
 
 ## License
 

@@ -16,7 +16,21 @@ except ImportError:
     import PyMca_OmnicMap
 
 #%%
-def Load_Omnic_Map(dir_path: str):
+def Load_Omnic_Map(dir_path: str, format: str = "Xarray-Dataset") -> xr.Dataset:
+    """_summary_
+
+    Args:
+        dir_path (str): _description_
+        format (str, optional): _description_. Defaults to "Xarray-Dataset". Other Options are "Xarray-DataArray" and "Dictionary".
+
+    Raises:
+        ValueError: Errors if the format is not supported.
+
+    Returns:
+        xr.Dataset: Dataset containing the spectral data, coordinates, and metadata.
+        xr.DataArray: DataArray containing the spectral data.
+        dict: Dictionary containing the spectral data, coordinates, and metadata.
+    """
     try:
         mapfile = PyMca_OmnicMap.OmnicMap(dir_path)
     except Exception as e:
@@ -46,22 +60,12 @@ def Load_Omnic_Map(dir_path: str):
     unit_long_names = {"x": "microns", "y": "microns", "wn": "wavenumbers", "data": "absorbance"}
     metadata = {"unit_names": unit_names, "unit_long_names": unit_long_names, **mapfile.info}
 
-
-    # DataArray = xr.DataArray(
-    #     mapfile.data,
-    #     dims=("y", "x", "wn"),
-    #     coords={"y": y_coords, "x": x_coords, "wn": wn},
-    #     attrs= metadata
-    # )
-    #This probably needs to be a dataset to work with previous functions. or they need to be made to arrays
+    # Reshape the data to match the unique x and y coordinates
+    # This assumes that the data is structured in a way that corresponds to the unique x and y coordinates.
     lenX = len(unique_x)
     lenY = len(unique_y)
     reshaped = mapfile.data.reshape(lenY, lenX, len_wn)
     data = {"spectra": (["y", "x", "wn"], reshaped)}
-    # print(f"reshaped shape: {reshaped.shape}")
-
-    # data = {"spectra": (["y", "x", "wn"], mapfile.data)}
-    # print(f"mapfile.data shape: {mapfile.data.shape}")
 
 
     coords = {
@@ -75,6 +79,19 @@ def Load_Omnic_Map(dir_path: str):
         coords= coords,
         attrs= metadata
     )
+    if format == "Xarray-Dataset":
+        return dataset
+    elif format == "Xarray-DataArray":
+        return dataset["spectra"]
+    elif format == "Dictionary":
+        return {
+            "data": dataset["spectra"].values,
+            "x": dataset["x"].values,
+            "y": dataset["y"].values,
+            "wn": dataset["wn"].values,
+            "metadata": metadata
+        }
+    else:
+        raise ValueError(f"Unsupported format: {format}. Supported formats are 'Xarray-Dataset', 'Xarray-DataArray', and 'Dictionary'.")
 
-    return dataset #DataArray
 # %%
