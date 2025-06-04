@@ -1,14 +1,12 @@
 # FTIR OMNIC Map Reader
 
 ## Table of Contents
-
 - [Description](#description)
 - [Installation](#installation)
 - [Directions](#directions)
 - [License](#license)
 
 ## Description
-
 This code aims to provide a convenient interface for reading FTIR Data specifically OMNIC .MAP files. It loads OMNIC .MAP files into python as Xarray dataset objects. This provides access to the coordinates and spectra of each point in the map. 
 
 The underlying code for reading OMINC .MAP files was part of the python package [PyMca](https://github.com/vasole/pymca?tab=readme-ov-file) X-Ray Fluorescence Toolkit. Developed by the European Synchrotron Radiation Facility.
@@ -16,7 +14,6 @@ The underlying code for reading OMINC .MAP files was part of the python package 
 If there is interest in adding particular features please let me know in the issues or make a pull request with the change. 
 
 ## Installation 
-
 You will already need to have a python environment installed on your computer to install this software. 
 If you do not have a python environment installed you can use [UV](https://docs.astral.sh/uv/) to install one.
 
@@ -42,9 +39,8 @@ If you would like to install the package from source you can do so by following 
 
 ## Directions
 
-### Xarray Dataset
- To load a map follow this example. 
-
+ ### Xarray Dataset
+To load a map follow this example: 
  ``` python
  from ftir_map  import LoadOmnicMAP as omnic
 
@@ -54,7 +50,6 @@ If you would like to install the package from source you can do so by following 
  coordinates = map.coords  # This contains the spatial and spectral coordinates
  metadata = map.attrs  # This contains the metadata from the .MAP file
  ```
-
  The map is an xarray [dataset](https://docs.xarray.dev/en/stable/generated/xarray.Dataset.html) object. It should contain the three main attributes
    - data_vars: This is all of the spectra in the map
    - coords: These are the spatial and spectral coordinates of the map
@@ -66,10 +61,9 @@ If you would like to install the package from source you can do so by following 
    
    I eventually hope to provide further guidance for processing the map files efficiently using xarray. 
 
-   ### Data as a Dictionary
-   If you would like to access the data as a dictionary containing the spectra data, spatial and spectral coordiantes, and metadata; you can do so b
-
-    ``` python
+ ### Data as a Dictionary
+   If you would like to access the data as a dictionary containing the spectra data, spatial and spectral coordiantes, and metadata; you can do so by  using the following code:
+   ``` python
     from ftir_map  import LoadOmnicMAP as omnic
     map_path = "greatest_map_ever.map"
     map_dict = omnic.Load_Omnic_Map_as_dict(map_path)
@@ -79,7 +73,5 @@ If you would like to install the package from source you can do so by following 
     wn_coordinates = map_dict['wn'] # This contains the spectral coordinates
     metadata = map_dict['metadata']  # This contains the metadata from the .MAP file
     ```
-
 ## License
-
 `FTIR OMNIC Map Reader` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
