@@ -63,7 +63,7 @@ To load a map follow this example:
 
  ### Data as a Dictionary
    If you would like to access the data as a dictionary containing the spectra data, spatial and spectral coordiantes, and metadata; you can do so by  using the following code:
-   ``` python
+``` python
    from ftir_map  import LoadOmnicMAP as omnic
    map_path = "greatest_map_ever.map"
    map_dict = omnic.Load_Omnic_Map_as_dict(map_path)
@@ -71,7 +71,7 @@ To load a map follow this example:
    x_coordinates = map_dict['x'] # This contains the x spatial coordinates
    y_coordinates = map_dict['y'] # This contains the y spatial coordinates
    wn_coordinates = map_dict['wn'] # This contains the spectral coordinates
-   metadata = map_dict['metadata']  # This contains the metadata from the .MAP file
-   ```
+   metadata = map_dict['metadata']  # This contains the metadata from the .MAP file  
+```
 ## License
 `FTIR OMNIC Map Reader` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
