@@ -1,11 +1,12 @@
-
-
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "ftir-OMNIC-map-reader"
 version = "1.0.0"
 #dynamic = ["version"]
-description = ''
+description = "Load Thermo OMNIC .map FTIR files into Python as xarray datasets"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -24,3 +25,5 @@ dependencies = [
 Documentation = "https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader#readme"
 Source = "https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/ftir_map"]

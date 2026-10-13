@@ -66,7 +66,7 @@ To load a map follow this example:
 ``` python
    from ftir_map  import LoadOmnicMAP as omnic
    map_path = "greatest_map_ever.map"
-   map_dict = omnic.Load_Omnic_Map_as_dict(map_path)
+   map_dict = omnic.Load_Omnic_Map(map_path, format="Dictionary")
    spectra = map_dict['data']  # This is the spectra data
    x_coordinates = map_dict['x'] # This contains the x spatial coordinates
    y_coordinates = map_dict['y'] # This contains the y spatial coordinates
