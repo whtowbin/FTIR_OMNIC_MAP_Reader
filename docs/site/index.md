@@ -24,8 +24,14 @@ m.export_all("my_map_export")  # spectra.zarr, points.csv, metadata.json and ima
 - [Map kinds](map_kinds.md): what a grid, line, points and array map return.
 - [Metadata and images](metadata.md) and [Exports](exports.md): what is stored, and every export with example output.
 - [Unpacked projects](unpacked.md) and the [command line](cli.md): `ftir-map unpack` and the other commands.
-- [File format notes](file_format.md): the reverse-engineered `.map` layout, with what is verified.
+- [File format notes](file_format.md): the `.map` layout, with what is verified.
 - [Python API](api.md), [Migrating from 1.0](migrating.md) and the [Changelog and credits](changelog.md).
+
+## Credits
+
+This reader is built on the OMNIC reader in [PyMca](https://github.com/silx-kit/pymca) (V.A. Sole, European
+Synchrotron Radiation Facility, MIT license). PyMca's code was the starting point and the key to decoding the rest of
+the file format; [How this reader was made](changelog.md#how-this-reader-was-made) tells the story.
 
 The source is at [github.com/whtowbin/FTIR_OMNIC_MAP_Reader](https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader). Report
 problems in its [issue tracker](https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader/issues).

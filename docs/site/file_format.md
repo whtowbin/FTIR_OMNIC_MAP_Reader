@@ -1,11 +1,15 @@
 # OMNIC .map file format (as read by `ftir_map.omnic`)
 
-This page records what `ftir_map.omnic` knows about the Thermo OMNIC `.map` container. It was reverse-engineered from 81 files. No specification was used.
+This page records what `ftir_map.omnic` knows about the Thermo OMNIC `.map` container. It builds on the OMNIC reader
+in [PyMca](https://github.com/silx-kit/pymca) (V.A. Sole, ESRF): PyMca's byte offsets and field indices identified the
+spectral header and the meaning of most of its fields, and they were the key to decoding the rest of the container.
+Section 9 lists those constants and what they locate. The block directory, stage positions, images and map definition
+were then worked out by comparing 81 files with OMNIC's own exports; see [How this reader was made](changelog.md#how-this-reader-was-made).
 
-!!! warning "Reverse-engineered, not an official specification"
-    Thermo has not published the `.map` format. Everything here was worked out by comparing files with OMNIC's own
-    exports, and each item is marked verified, consistent or unverified below. A file from another OMNIC version or
-    instrument may differ; `read_omnic` raises `OmnicFormatError` rather than guess.
+!!! warning "Not an official specification"
+    Thermo has not published the `.map` format. What is not taken from PyMca was worked out by comparing files with
+    OMNIC's own exports, and each item is marked verified, consistent or unverified below. A file from another OMNIC
+    version or instrument may differ; `read_omnic` raises `OmnicFormatError` rather than guess.
 
 - 78 maps from a 2017 microscope session: grids, line scans, one point-to-point map and one interferogram map.
 - 3 maps from 2025: two array-detector maps and one plate map.

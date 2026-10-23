@@ -9,6 +9,8 @@
 ### Changed
 
 - README is a short overview that links to each page of the documentation site.
+- Documentation and NOTICE credit PyMca fully: "How this reader was made" describes how the reader was built on
+  PyMca's OmnicMap.py, whose constants were the key to the file format. PyMca links point to silx-kit/pymca.
 
 ## 1.1.0 (2026-10-22)
 

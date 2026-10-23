@@ -12,3 +12,6 @@ __pycache__/
 .complexipy_cache/
 dist/
 /site/
+
+# Local session handoff notes (not for users)
+/HANDOFF.md
