@@ -19,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install the package, the test tools and the zarr extra
-        run: uv sync --extra zarr
+      - name: Install the package, the test tools and all extras
+        run: uv sync --all-extras
       - name: Run the tests
         run: uv run pytest -q

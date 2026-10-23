@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import importlib
 import io
 import math
 import warnings
 from importlib import metadata as importlib_metadata
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -52,24 +54,34 @@ def reader_version() -> str:
         return "unknown"
 
 
+def import_optional(module: str, extra: str, feature: str, package: str | None = None) -> ModuleType:
+    """Import an optional dependency, or raise an ImportError that names the extra to install."""
+    try:
+        return importlib.import_module(module)
+    except ImportError as error:
+        raise ImportError(
+            f"{feature} needs the optional {package or module} package: pip install '{PACKAGE_NAME}[{extra}]'"
+        ) from error
+
+
 def axis_name(m: OmnicMap) -> str:
     """Name of the spectral dimension: "wavenumber" for cm-1 data, otherwise "axis" (interferogram points)."""
     return "wavenumber" if m.axis_unit == "cm-1" else "axis"
 
 
-def _json_safe(value: Any) -> Any:
+def json_safe(value: Any) -> Any:
     """Convert a value to what JSON can hold: dicts, lists, strings, numbers, booleans and None.
 
     Tuples and arrays become lists, datetimes and paths become strings, and non-finite floats become None.
     """
     if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
+        return {str(key): json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
+        return [json_safe(item) for item in value]
     if isinstance(value, np.ndarray):
-        return _json_safe(value.tolist())
+        return json_safe(value.tolist())
     if isinstance(value, np.generic):
-        return _json_safe(value.item())
+        return json_safe(value.item())
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, (dt.datetime, dt.date)):
@@ -102,7 +114,7 @@ def build_metadata(m: OmnicMap) -> dict[str, Any]:
         "map_description": dataclasses.asdict(m.map_description) if m.map_description else None,
         "history": m.history,
     }
-    return _json_safe(metadata)
+    return json_safe(metadata)
 
 
 # ------------------------------------------------------------------ grid helpers
@@ -251,10 +263,7 @@ def to_zarr(m: OmnicMap, path: str | Path, mode: Literal["w", "w-"] = "w-") -> N
     """
     if mode == "w-" and Path(path).exists():
         raise FileExistsError(f"{path} exists; pass mode='w' to replace it")
-    try:
-        import zarr  # noqa: F401
-    except ImportError as error:
-        raise ImportError(f"to_zarr needs the optional zarr package: pip install '{PACKAGE_NAME}[zarr]'") from error
+    import_optional("zarr", "zarr", "to_zarr")
     with warnings.catch_warnings():
         # zarr 3 warns that consolidated metadata is outside its spec; xarray still reads it back fastest
         warnings.filterwarnings("ignore", message="Consolidated metadata")

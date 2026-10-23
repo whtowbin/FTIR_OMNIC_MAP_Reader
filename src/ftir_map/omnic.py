@@ -3,7 +3,8 @@
 `read_omnic(path)` returns an `OmnicMap`: spectra, spectral axis, stage positions, map kind, backgrounds, video or
 mosaic images with their stage extents, and the collection metadata that could be decoded. The file layout, the block
 table and which fields are verified are described in docs/file_format.md. The export methods of `OmnicMap`
-(`to_xarray`, `to_numpy`, `to_dict`, `to_zarr`, `to_images`) live in `ftir_map.exports`.
+(`to_xarray`, `to_numpy`, `to_dict`, `to_zarr`, `to_images`) live in `ftir_map.exports`; the file writers
+(`save_metadata`, `save_points`, `save_spectra`, `save_images`, `export_all`) live in `ftir_map.writers`.
 
 Reading needs only numpy and the standard library. It does not use the PyMca-derived readers.
 """
@@ -242,6 +243,44 @@ class OmnicMap:
         from .exports import to_images
 
         return to_images(self)
+
+    def save_metadata(self, path: str | Path, format: str | None = None) -> None:
+        """Write the metadata as JSON, YAML or CSV (format from the extension). See docs/exports.md."""
+        from .writers import save_metadata
+
+        save_metadata(self, path, format)
+
+    def save_points(self, path: str | Path, format: str | None = None) -> None:
+        """Write the per-point table (position, title, time, background) as CSV, Parquet or JSON."""
+        from .writers import save_points
+
+        save_points(self, path, format)
+
+    def save_spectra(self, path: str | Path, format: str | None = None) -> None:
+        """Write the spectra as CSV, NPZ, netCDF (.nc) or Zarr."""
+        from .writers import save_spectra
+
+        save_spectra(self, path, format)
+
+    def save_images(self, folder: str | Path, format: str = "png") -> list[dict]:
+        """Write the images with world files and an index (images.json, images.csv); returns the index records."""
+        from .writers import save_images
+
+        return save_images(self, folder, format)
+
+    def export_all(
+        self,
+        folder: str | Path,
+        spectra: str = "zarr",
+        metadata: str = "json",
+        points: str = "csv",
+        images: str = "png",
+        overwrite: bool = False,
+    ) -> Path:
+        """Write spectra, points table, metadata and images into one self-describing folder."""
+        from .writers import export_all
+
+        return export_all(self, folder, spectra, metadata, points, images, overwrite)
 
     def spectra_grid(self) -> np.ndarray:
         """Spectra as (n_rows, n_columns, n_wn), NaN where a grid cell has no spectrum. Grid maps only."""
