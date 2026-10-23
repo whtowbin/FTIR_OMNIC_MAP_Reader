@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Unpack maps into an open, documented folder: `ftir-map unpack SRC [SRC ...] --out PROJECT` and
+  `ftir_map.unpack(sources, project_dir)`. Each map becomes `maps/<name>/` with `map.json`, `spectra.nc` (netCDF4),
+  `points.csv`, the embedded images byte for byte with world files, and a `README.txt`. `catalog.csv` and
+  `catalog.json` list every source file; unreadable files (such as mosaic-only maps) are listed as skipped. Re-running
+  skips maps that are already unpacked. Options: `--spectra zarr|csv`, `--png`, `--copy-source`, `--overwrite`.
+  The format is in docs/unpacked_format.md.
+- `read_unpacked(folder)` rebuilds the `OmnicMap` from an unpacked map (spectra bit for bit; the raw header bytes and
+  block directory are not kept). `open_project(folder)` returns a `Project` with `catalog`, `names`, `load(name)` and
+  `to_xarray(name)`. `ftir_map.load(path)` opens a `.map` file, an unpacked map or a project. `OmnicMap.unpack(folder)`.
+- `ftir-map catalog PROJECT` lists the maps of a project.
+
+### Changed
+
+- `h5netcdf` and `h5py` (wheels only) and `pandas` are now core dependencies, because `spectra.nc` is the default
+  spectra file. The `[netcdf]` extra stays as an alias, so `pip install "ftir-OMNIC-map-reader[netcdf]"` still works.
+- `writers.write_csv`, `write_json`, `exports.backgrounds_array`, `exports.axis_dimension` and
+  `exports.dataset_to_zarr` are public names now (they were private or inline).
+
 ## 1.1.0
 
 ### Added

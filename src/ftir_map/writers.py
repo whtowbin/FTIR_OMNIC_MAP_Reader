@@ -80,7 +80,7 @@ def csv_cell(value: Any) -> Any:
     return value
 
 
-def _write_csv(path: Path, header: Iterable[str], rows: Iterable[Iterable[Any]]) -> None:
+def write_csv(path: Path, header: Iterable[str], rows: Iterable[Iterable[Any]]) -> None:
     """CSV with a header row; see `csv_cell` for how fields are written."""
     with open(path, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
@@ -88,12 +88,12 @@ def _write_csv(path: Path, header: Iterable[str], rows: Iterable[Iterable[Any]])
         writer.writerows([csv_cell(value) for value in row] for row in rows)
 
 
-def _write_json(path: Path, content: Any) -> None:
+def write_json(path: Path, content: Any) -> None:
     path.write_text(json.dumps(content, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _write_columns_csv(columns: Columns, path: Path) -> None:
-    _write_csv(path, columns, zip(*columns.values(), strict=True))
+    write_csv(path, columns, zip(*columns.values(), strict=True))
 
 
 # ------------------------------------------------------------------ metadata
@@ -112,7 +112,7 @@ def flatten_metadata(value: Any, prefix: str = "") -> dict[str, Any]:
 
 
 def _metadata_json(metadata: dict[str, Any], path: Path) -> None:
-    _write_json(path, metadata)
+    write_json(path, metadata)
 
 
 def _metadata_yaml(metadata: dict[str, Any], path: Path) -> None:
@@ -122,7 +122,7 @@ def _metadata_yaml(metadata: dict[str, Any], path: Path) -> None:
 
 
 def _metadata_csv(metadata: dict[str, Any], path: Path) -> None:
-    _write_csv(path, ["key", "value"], flatten_metadata(metadata).items())
+    write_csv(path, ["key", "value"], flatten_metadata(metadata).items())
 
 
 METADATA_WRITERS: Mapping[str, Callable[[dict[str, Any], Path], None]] = {
@@ -166,7 +166,7 @@ def points_table(m) -> Columns:
 
 
 def _points_json(columns: Columns, path: Path) -> None:
-    _write_json(path, [dict(zip(columns, row, strict=True)) for row in zip(*columns.values(), strict=True)])
+    write_json(path, [dict(zip(columns, row, strict=True)) for row in zip(*columns.values(), strict=True)])
 
 
 def _points_parquet(columns: Columns, path: Path) -> None:
@@ -312,8 +312,8 @@ def save_images(m, folder: str | Path, format: str = "png") -> list[dict[str, An
             world_file = path.with_suffix(WORLD_SUFFIX[saved_format])
             world_file.write_text(world_file_text(image.extent, image.array.shape[1], image.array.shape[0]))
         records.append(_image_record(image, path, world_file))
-    _write_json(folder / "images.json", records)
-    _write_csv(
+    write_json(folder / "images.json", records)
+    write_csv(
         folder / "images.csv", IMAGE_INDEX_COLUMNS, ([record[c] for c in IMAGE_INDEX_COLUMNS] for record in records)
     )
     return records

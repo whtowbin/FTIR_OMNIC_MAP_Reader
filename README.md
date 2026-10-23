@@ -80,6 +80,28 @@ for image in m.to_images():
 plt.plot(m.x, m.y, "r.")
 ```
 
+## Unpack maps into an open project folder
+
+`ftir-map unpack` turns proprietary `.map` files into a folder of open files: spectra in netCDF4 (readable from MATLAB, R,
+Igor, Julia and Python without this package), `points.csv`, `map.json` with all metadata, and the embedded images with
+world files. Give it files and/or folders; it finds `.map` files recursively, lists unreadable ones in the catalog, and
+skips maps that are already unpacked. The format is in [docs/unpacked_format.md](docs/unpacked_format.md).
+
+```console
+ftir-map unpack "Bristol 2017/" other_map.map --out my_project [--spectra nc|zarr|csv] [--png] [--copy-source]
+ftir-map catalog my_project
+```
+
+```python
+import ftir_map
+
+project = ftir_map.unpack(["Bristol 2017/"], "my_project")  # or ftir_map.open_project("my_project")
+project.catalog  # pandas DataFrame, one row per source file
+m = project.load(project.names[0])  # an OmnicMap, rebuilt from the open files
+ds = project.to_xarray(project.names[0])
+ftir_map.load("my_project/maps/my_map")  # also reads one unpacked map, a project, or a .map file
+```
+
 ## Metadata
 
 `m.collection` (number of points, first and last X, scans, laser frequency, mirror velocity and more),

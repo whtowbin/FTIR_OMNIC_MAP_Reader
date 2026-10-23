@@ -34,7 +34,7 @@ def acquisition_block(velocity=2.5317):
 def spectrum_header(title, centiseconds):
     h = bytearray(96)
     struct.pack_into("<II", h, 0, 256, centiseconds)
-    h[16 : 16 + len(title)] = title.encode("ascii")
+    h[16 : 16 + len(title)] = title.encode("latin-1")
     return bytes(h)
 
 
@@ -68,7 +68,7 @@ def map_definition(kind, x_range, y_range, step, title="synthetic map"):
     struct.pack_into("<4d", b, 8, *x_range, *y_range)
     struct.pack_into("<d", b, 88, step)
     struct.pack_into("<2d", b, 112, step, step)
-    b[180 : 180 + len(title)] = title.encode("ascii")
+    b[180 : 180 + len(title)] = title.encode("latin-1")
     return bytes(b)
 
 

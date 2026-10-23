@@ -282,6 +282,15 @@ class OmnicMap:
 
         return export_all(self, folder, spectra, metadata, points, images, overwrite)
 
+    def unpack(self, folder: str | Path, **options) -> dict:
+        """Write an open, documented folder (map.json, spectra.nc, points.csv, images) that `read_unpacked` loads back.
+
+        Options: `spectra` ("nc", "zarr" or "csv"), `png`, `copy_source`, `overwrite`. See docs/unpacked_format.md.
+        """
+        from .unpacked import unpack_map
+
+        return unpack_map(self, folder, **options)
+
     def spectra_grid(self) -> np.ndarray:
         """Spectra as (n_rows, n_columns, n_wn), NaN where a grid cell has no spectrum. Grid maps only."""
         if self.grid_shape is None or self.grid_index is None:

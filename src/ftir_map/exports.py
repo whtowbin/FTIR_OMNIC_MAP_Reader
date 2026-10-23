@@ -64,9 +64,14 @@ def import_optional(module: str, extra: str, feature: str, package: str | None =
         ) from error
 
 
-def axis_name(m: OmnicMap) -> str:
+def axis_dimension(axis_unit: str) -> str:
     """Name of the spectral dimension: "wavenumber" for cm-1 data, otherwise "axis" (interferogram points)."""
-    return "wavenumber" if m.axis_unit == "cm-1" else "axis"
+    return "wavenumber" if axis_unit == "cm-1" else "axis"
+
+
+def axis_name(m: OmnicMap) -> str:
+    """Name of the spectral dimension of a map; see `axis_dimension`."""
+    return axis_dimension(m.axis_unit)
 
 
 def json_safe(value: Any) -> Any:
@@ -143,7 +148,7 @@ def _scatter_to_grid(m: OmnicMap, values: np.ndarray, fill) -> np.ndarray:
     return out
 
 
-def _backgrounds_array(m: OmnicMap) -> np.ndarray | None:
+def backgrounds_array(m: OmnicMap) -> np.ndarray | None:
     """Backgrounds as (n_backgrounds, n_axis) float32 on the spectra's axis, or None if there are none.
 
     Returns None as well when a background has a different length from the spectra, which the files read so far
@@ -165,7 +170,7 @@ def to_xarray(m: OmnicMap) -> xr.Dataset:
     The last dimension is called "axis" instead of "wavenumber" for interferogram maps.
     """
     dataset = _grid_dataset(m) if m.grid_shape is not None else _point_dataset(m)
-    background_array = _backgrounds_array(m)
+    background_array = backgrounds_array(m)
     if background_array is not None:
         dataset["backgrounds"] = (("background", axis_name(m)), background_array)
         dataset = dataset.assign_coords(
@@ -248,7 +253,7 @@ def to_dict(m: OmnicMap) -> dict[str, Any]:
         "titles": list(m.titles),
         "time_s": m.times_s,
         "background_index": m.background_index,
-        "backgrounds": _backgrounds_array(m),
+        "backgrounds": backgrounds_array(m),
         "images": images,
     }
 
@@ -263,11 +268,16 @@ def to_zarr(m: OmnicMap, path: str | Path, mode: Literal["w", "w-"] = "w-") -> N
     """
     if mode == "w-" and Path(path).exists():
         raise FileExistsError(f"{path} exists; pass mode='w' to replace it")
+    dataset_to_zarr(to_xarray(m), path, mode)
+
+
+def dataset_to_zarr(dataset: xr.Dataset, path: str | Path, mode: Literal["w", "w-"] = "w-") -> None:
+    """Write any dataset to a Zarr store, without zarr 3's warning about consolidated metadata."""
     import_optional("zarr", "zarr", "to_zarr")
     with warnings.catch_warnings():
         # zarr 3 warns that consolidated metadata is outside its spec; xarray still reads it back fastest
         warnings.filterwarnings("ignore", message="Consolidated metadata")
-        to_xarray(m).to_zarr(path, mode=mode)
+        dataset.to_zarr(path, mode=mode)
 
 
 # ------------------------------------------------------------------ images
