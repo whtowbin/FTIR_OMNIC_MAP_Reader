@@ -271,7 +271,8 @@ def to_images(m: OmnicMap) -> list[ImageArray]:
     """
     out = []
     for stage_image in m.images:
-        with Image.open(io.BytesIO(stage_image.data)) as decoded:
+        # Decode only the format the block declares ("BMP" or "JPEG"); never let Pillow guess from file content.
+        with Image.open(io.BytesIO(stage_image.data), formats=[stage_image.format]) as decoded:
             array = np.asarray(decoded.convert("RGB"))
         out.append(ImageArray(stage_image.index, stage_image.format, array, stage_image.stage_extent))
     return out
