@@ -8,8 +8,7 @@ mosaic images with their stage coordinates, and the collection metadata that cou
 
 ```console
 pip install ftir-OMNIC-map-reader
-pip install "ftir-OMNIC-map-reader[zarr]"   # only if you want to write Zarr stores
-pip install "ftir-OMNIC-map-reader[yaml,parquet,netcdf]"   # optional: YAML metadata, Parquet points, netCDF spectra
+pip install "ftir-OMNIC-map-reader[yaml,parquet,netcdf]"   # optional: YAML metadata, Parquet points, netCDF export
 ```
 
 With [uv](https://docs.astral.sh/uv/): `uv add ftir-OMNIC-map-reader`. Python 3.10 or newer.
@@ -49,7 +48,7 @@ Each export is described, with example output, in [docs/exports.md](docs/exports
 ds = m.to_xarray()  # xarray.Dataset, attrs hold the metadata
 spectra, axes, positions, metadata = m.to_numpy()  # arrays and plain dicts
 everything = m.to_dict()  # spectra, axes, positions, titles, times, backgrounds, images
-m.to_zarr("my_map.zarr")  # needs the zarr extra; refuses to overwrite by default
+m.to_zarr("my_map.zarr")  # refuses to overwrite by default
 images = m.to_images()  # video images or mosaic tiles with stage extents
 ```
 
@@ -82,13 +81,15 @@ plt.plot(m.x, m.y, "r.")
 
 ## Unpack maps into an open project folder
 
-`ftir-map unpack` turns proprietary `.map` files into a folder of open files: spectra in netCDF4 (readable from MATLAB, R,
-Igor, Julia and Python without this package), `points.csv`, `map.json` with all metadata, and the embedded images with
+`ftir-map unpack` turns proprietary `.map` files into a folder of open files: spectra in Zarr (`spectra.zarr`, readable with
+`xarray.open_zarr` or `zarr.open` in Python, and with the Zarr packages of R and Julia; use `--spectra csv` for MATLAB
+or Excel), `points.csv`, `map.json` with all metadata, and the embedded images with
 world files. Give it files and/or folders; it finds `.map` files recursively, lists unreadable ones in the catalog, and
 skips maps that are already unpacked. The format is in [docs/unpacked_format.md](docs/unpacked_format.md).
 
 ```console
-ftir-map unpack "Bristol 2017/" other_map.map --out my_project [--spectra nc|zarr|csv] [--png] [--copy-source]
+ftir-map unpack "Bristol 2017/" other_map.map --out my_project [--spectra zarr|csv|nc] [--png] [--copy-source]
+# --spectra nc is an opt-in export and needs the [netcdf] extra
 ftir-map catalog my_project
 ```
 

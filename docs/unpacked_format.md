@@ -1,7 +1,7 @@
 # The "ftir-map unpacked" format, version 1
 
 `ftir-map unpack` turns a proprietary OMNIC `.map` file into a folder of open files. Nothing in the folder needs OMNIC or
-this package: the spectra are in netCDF4 (HDF5), the tables in CSV and the metadata in JSON. The images are the bytes
+this package: the spectra are in Zarr, the tables in CSV and the metadata in JSON. The images are the bytes
 OMNIC embedded (BMP or JPEG). `ftir_map.read_unpacked` and `ftir_map.load` read the folder back into an `OmnicMap`.
 
 ## One map
@@ -9,7 +9,7 @@ OMNIC embedded (BMP or JPEG). `ftir_map.read_unpacked` and `ftir_map.load` read 
 ```
 my_map/
   map.json          format name and version, source file, all metadata, per-background and per-image records
-  spectra.nc        spectra, axis, positions, titles, times, backgrounds (netCDF4)
+  spectra.zarr/     spectra, axis, positions, titles, times, backgrounds (a Zarr store: a folder)
   points.csv        one row per spectrum
   images/           only if the map has images
     image_01.bmp      the embedded file, byte for byte (.jpg for mosaic tiles)
@@ -18,7 +18,7 @@ my_map/
     images.json       the same as JSON
     png/              only with --png: image_01.png, image_01.pgw, images.csv, images.json
   source/my_map.map only with --copy-source: the original file
-  README.txt        what each file is, and how to open spectra.nc from Python, MATLAB, R and Julia
+  README.txt        what each file is, and how to open spectra.zarr from Python, R and Julia
 ```
 
 `map.json` is written last. A folder without it is an unfinished write.
@@ -31,14 +31,14 @@ my_map/
 | `reader_version` | Version of ftir-OMNIC-map-reader that wrote the folder. |
 | `unpacked_at` | UTC time, ISO 8601. |
 | `source` | `file_name`, `path`, `size_bytes`, `sha256` of the original `.map`, and `copied_to` (path under the map folder, or null). |
-| `files` | `spectra` (file name), `spectra_format` (`nc`, `zarr` or `csv`), `points`, `images` (folder name). |
+| `files` | `spectra` (file name), `spectra_format` (`zarr`, `csv` or `nc`), `points`, `images` (folder name). |
 | `metadata` | Everything `build_metadata` gives: `title`, `file_time`, `layout`, `map_kind`, `data_kind`, `axis_unit`, `grid_shape`, `n_points`, `collection` (the decoded header fields), `map_definition`, `map_description`, `history`. Same content as `to_xarray().attrs`. |
 | `backgrounds` | One record per background, in order: `title`, `time`, `data_kind`, `wavenumber_first`, `wavenumber_last`. The spectra are in the spectra file. |
 | `images` | One record per image: `index`, `format` (`BMP` or `JPEG`), `file`, `width`, `height`, `extent` (x0, y0, x1, y1 as stored, stage um, or null). |
 
 Numbers that are NaN or infinite in the source are `null` in JSON.
 
-### spectra.nc
+### spectra.zarr
 
 Every map is stored as points in file order, grid maps too. A grid map is not reshaped; `grid_row` and `grid_column` say
 which cell each point belongs to. A variable the map did not record is absent.
@@ -57,22 +57,25 @@ which cell each point belongs to. A variable the map did not record is absent.
 | `background_index` | point | int64 | Which background the spectrum was ratioed against (row of `backgrounds`). |
 | `backgrounds` | background, wavenumber | float32 | Background single-beam spectra on the same axis. Absent if the map has none. |
 
-Global attributes: `format`, `format_version`, `source_file`. Floating-point variables have no `_FillValue`; NaN means
-missing. `spectra` and `backgrounds` are gzip-compressed (level 4, shuffled).
+Global attributes: `format`, `format_version`, `source_file`. NaN means missing. The same variables are written to
+`spectra.nc` with `--spectra nc` (see below).
 
 Opening without this package:
 
 ```python
 import xarray as xr
 
-ds = xr.open_dataset("spectra.nc", engine="h5netcdf")  # or h5py.File("spectra.nc")["spectra"][:]
-```
-```matlab
-spectra = ncread('spectra.nc', 'spectra');   % [wavenumber x point]: MATLAB lists the dimensions in reverse order
+ds = xr.open_zarr("spectra.zarr")  # or zarr.open("spectra.zarr")["spectra"][:]
 ```
 ```r
-nc <- ncdf4::nc_open("spectra.nc"); spectra <- ncdf4::ncvar_get(nc, "spectra")
+# Rarr package
+spectra <- Rarr::read_zarr_array("spectra.zarr/spectra")
 ```
+```julia
+using Zarr; z = zopen("spectra.zarr"); spectra = z["spectra"][:, :]
+```
+
+MATLAB and Excel do not read Zarr; write `--spectra csv` for them.
 
 ### points.csv
 
@@ -89,7 +92,9 @@ are upright with stage Y increasing upward; see [file_format.md](file_format.md)
 
 ### Other spectra formats
 
-`--spectra zarr` writes `spectra.zarr` with the same variables as `spectra.nc` (open it with `xarray.open_zarr`).
+`--spectra nc` is an opt-in export: it writes `spectra.nc` (netCDF4 through h5netcdf, with the same variables as
+`spectra.zarr`; gzip level 4, shuffled, no `_FillValue`) and needs `pip install "ftir-OMNIC-map-reader[netcdf]"`. Open it
+with `xarray.open_dataset("spectra.nc", engine="h5netcdf")` or MATLAB's `ncread('spectra.nc', 'spectra')`.
 `--spectra csv` writes `spectra.csv` (first column the axis, then one column per spectrum named by its index) and
 `backgrounds.csv` in the same layout. CSV keeps 9 significant digits: the float32 spectra are exact, the axis is
 rounded. Positions, titles and times come from `points.csv`.

@@ -263,7 +263,7 @@ def to_zarr(m: OmnicMap, path: str | Path, mode: Literal["w", "w-"] = "w-") -> N
     """Write `to_xarray(m)` to a Zarr store at `path`. `mode="w-"` refuses to overwrite an existing store.
 
     Raises:
-        ImportError: if the optional zarr package is not installed.
+        ImportError: if the zarr package is not installed.
         FileExistsError: if `mode="w-"` and `path` exists.
     """
     if mode == "w-" and Path(path).exists():

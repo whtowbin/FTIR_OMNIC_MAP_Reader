@@ -198,7 +198,7 @@ def unpack(
     sources: Iterable[str | Path],
     project_dir: str | Path,
     *,
-    spectra: str = "nc",
+    spectra: str = "zarr",
     png: bool = False,
     copy_source: bool = False,
     overwrite: bool = False,

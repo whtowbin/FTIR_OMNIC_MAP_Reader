@@ -65,7 +65,9 @@ def build_parser() -> argparse.ArgumentParser:
     pack = commands.add_parser("unpack", help="unpack .map files into an open project folder")
     pack.add_argument("sources", nargs="+", metavar="SRC", help=".map files and folders searched for .map files")
     pack.add_argument("--out", required=True, metavar="PROJECT", help="project folder")
-    pack.add_argument("--spectra", choices=SPECTRA_FORMATS, default="nc")
+    pack.add_argument(
+        "--spectra", choices=SPECTRA_FORMATS, default="zarr", help="spectra file; nc needs the [netcdf] extra"
+    )
     pack.add_argument("--png", action="store_true", help="also write the images as PNG")
     pack.add_argument("--copy-source", action="store_true", help="copy each original .map file into its folder")
     pack.add_argument("--overwrite", action="store_true", help="unpack again maps that are already in the project")

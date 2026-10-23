@@ -8,7 +8,6 @@ import subprocess
 import sys
 import time
 
-import h5py
 import numpy as np
 import pytest
 import xarray as xr
@@ -121,11 +120,11 @@ def test_round_trip_real_files(name, tmp_path):
     assert_same_map(m, read_unpacked(tmp_path / "out"))
 
 
-@pytest.mark.parametrize("spectra_format", ["zarr", "csv"])
+@pytest.mark.parametrize("spectra_format", ["zarr", "csv", "nc"])
 @pytest.mark.parametrize("case", ["grid-extended", "nan-and-inf", "points-classic-z", "interferogram"])
-def test_round_trip_zarr_and_csv(case, spectra_format, tmp_path):
-    if spectra_format == "zarr":
-        pytest.importorskip("zarr")
+def test_round_trip_each_spectra_format(case, spectra_format, tmp_path):
+    if spectra_format == "nc":
+        pytest.importorskip("h5netcdf")
     m = SYNTHETIC[case](tmp_path)
     m.unpack(tmp_path / "out", spectra=spectra_format)
     # the csv axis keeps 9 significant digits; everything else is exact
@@ -153,10 +152,11 @@ def test_folder_layout_and_original_images(tmp_path):
     m.unpack(tmp_path / "out", png=True, copy_source=True)
     out = tmp_path / "out"
     names = {p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()}
+    assert (out / "spectra.zarr").is_dir()  # a Zarr store is a folder of chunk files
+    names = {n for n in names if not n.startswith("spectra.zarr/")}
     assert names == {
         "map.json",
         "README.txt",
-        "spectra.nc",
         "points.csv",
         "source/grid.map",
         "images/image_01.bmp",
@@ -174,12 +174,44 @@ def test_folder_layout_and_original_images(tmp_path):
     assert (meta["format"], meta["format_version"]) == ("ftir-map unpacked", 1)
     assert meta["source"]["file_name"] == "grid.map" and len(meta["source"]["sha256"]) == 64
     assert meta["metadata"]["collection"]["n_sample_scans"] == 16
-    assert "ncread" in (out / "README.txt").read_text(encoding="utf-8")
+    assert "xr.open_zarr" in (out / "README.txt").read_text(encoding="utf-8")
+
+
+def test_zarr_opens_without_this_package(tmp_path):
+    m = grid_map(tmp_path)
+    m.unpack(tmp_path / "out")
+    assert not (tmp_path / "out" / "spectra.nc").exists()
+    with xr.open_zarr(tmp_path / "out" / "spectra.zarr", decode_times=False, decode_timedelta=False) as ds:
+        assert ds["spectra"].dims == ("point", "wavenumber")  # plain xarray: no ftir_map call
+        np.testing.assert_array_equal(ds["spectra"].values, m.spectra)
+        assert ds["wavenumber"].attrs["units"] == "cm-1"
+        assert ds["x"].attrs["units"] == "um"
+        assert ds["time_s"].dtype == np.float64
+        assert list(ds["title"].values) == m.titles
+        assert set(ds.data_vars) >= {"x", "y", "grid_row", "grid_column", "background_index", "backgrounds"}
+        assert ds.attrs["format"] == "ftir-map unpacked"
+
+
+def test_default_unpack_needs_neither_h5netcdf_nor_h5py(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "h5netcdf", None)  # makes `import h5netcdf` raise ImportError
+    monkeypatch.setitem(sys.modules, "h5py", None)
+    m = grid_map(tmp_path)
+    m.unpack(tmp_path / "out")
+    assert (tmp_path / "out" / "spectra.zarr").is_dir() and not (tmp_path / "out" / "spectra.nc").exists()
+    assert_same_map(m, read_unpacked(tmp_path / "out"))
+
+
+def test_netcdf_is_an_opt_in_with_a_clear_error(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "h5netcdf", None)
+    with pytest.raises(ImportError, match=r"ftir-OMNIC-map-reader\[netcdf\]"):
+        grid_map(tmp_path).unpack(tmp_path / "out", spectra="nc")
 
 
 def test_netcdf_opens_without_this_package(tmp_path):
+    pytest.importorskip("h5netcdf")
+    h5py = pytest.importorskip("h5py")
     m = grid_map(tmp_path)
-    m.unpack(tmp_path / "out")
+    m.unpack(tmp_path / "out", spectra="nc")
     path = tmp_path / "out" / "spectra.nc"
     with xr.open_dataset(path, engine="h5netcdf") as ds:  # plain xarray: no ftir_map call
         assert ds["spectra"].dims == ("point", "wavenumber")
@@ -205,11 +237,10 @@ def test_unpack_refuses_a_nonempty_folder_and_overwrite_replaces_only_its_files(
     (out / "mine.txt").write_text("keep")
     with pytest.raises(FileExistsError):
         m.unpack(out)
-    pytest.importorskip("zarr")
-    m.unpack(out, spectra="zarr", overwrite=True)
-    assert not (out / "spectra.nc").exists() and (out / "spectra.zarr").exists()
+    m.unpack(out, spectra="csv", overwrite=True)
+    assert not (out / "spectra.zarr").exists() and (out / "spectra.csv").exists()
     assert (out / "mine.txt").read_text() == "keep"
-    assert_same_map(m, read_unpacked(out))
+    assert_same_map(m, read_unpacked(out), axis_exact=False)
 
 
 def test_unpack_rejects_an_unknown_spectra_format(tmp_path):
@@ -296,7 +327,7 @@ def test_rerun_is_idempotent_and_overwrite_unpacks_again(library, tmp_path):
     assert map_json.read_bytes() == before[0]
     stale = project_dir / "maps/my_map/stale.txt"
     stale.write_text("x")
-    (project_dir / "maps/my_map/spectra.nc").write_bytes(b"damaged")
+    (project_dir / "maps/my_map/spectra.zarr/damaged.txt").write_bytes(b"damaged")
     actions.clear()
     unpack([library], project_dir, overwrite=True, progress=record(actions))
     assert sorted(action for _, action in actions) == ["skipped", "skipped", "unpacked", "unpacked"]
@@ -371,10 +402,14 @@ def test_cli_unpack_and_catalog(library, tmp_path):
 
 
 def test_cli_unpack_spectra_option_and_errors(library, tmp_path):
-    pytest.importorskip("zarr")
     out = tmp_path / "project"
-    assert run_cli("unpack", str(library / "a" / "my map.map"), "--out", str(out), "--spectra", "zarr").returncode == 0
-    assert (out / "maps/my_map/spectra.zarr").exists()
+    assert run_cli("unpack", str(library / "a" / "my map.map"), "--out", str(out)).returncode == 0
+    assert (out / "maps/my_map/spectra.zarr").exists() and not (out / "maps/my_map/spectra.nc").exists()
+    out_csv = tmp_path / "project_csv"
+    assert (
+        run_cli("unpack", str(library / "a" / "my map.map"), "--out", str(out_csv), "--spectra", "csv").returncode == 0
+    )
+    assert (out_csv / "maps/my_map/spectra.csv").exists()
     missing = run_cli("unpack", str(tmp_path / "nothing"), "--out", str(out))
     assert missing.returncode == 1 and "does not exist" in missing.stderr
     assert run_cli("catalog", str(tmp_path)).returncode == 1
@@ -461,18 +496,18 @@ def test_overwrite_replaces_links_inside_a_map_folder_without_following_them(tmp
     folder = tmp_path / "unpacked"
     m = grid_map(tmp_path)
     m.unpack(folder)
-    outside_file, outside_dir = tmp_path / "outside.nc", tmp_path / "outside_images"
+    outside_file, outside_dir = tmp_path / "outside.zarr", tmp_path / "outside_images"
     if not dangling:
         outside_file.write_bytes(b"keep me")
         outside_dir.mkdir()
         (outside_dir / "keep.txt").write_text("keep")
-    (folder / "spectra.nc").unlink()
-    (folder / "spectra.nc").symlink_to(outside_file)
+    shutil.rmtree(folder / "spectra.zarr")
+    (folder / "spectra.zarr").symlink_to(outside_file)
     if (folder / "images").exists():
         shutil.rmtree(folder / "images")
     (folder / "images").symlink_to(outside_dir, target_is_directory=True)
     m.unpack(folder, overwrite=True)
-    assert not (folder / "spectra.nc").is_symlink() and not (folder / "images").is_symlink()
+    assert not (folder / "spectra.zarr").is_symlink() and not (folder / "images").is_symlink()
     if not dangling:
         assert outside_file.read_bytes() == b"keep me"
         assert [p.name for p in outside_dir.iterdir()] == ["keep.txt"]

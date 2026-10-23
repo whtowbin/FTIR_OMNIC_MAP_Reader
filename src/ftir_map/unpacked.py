@@ -1,6 +1,6 @@
 """Unpack one map into an open folder, and read it back.
 
-`unpack_map(m, folder)` (also `m.unpack(folder)`) writes `map.json`, `spectra.nc`, `points.csv`, `images/` and a
+`unpack_map(m, folder)` (also `m.unpack(folder)`) writes `map.json`, `spectra.zarr`, `points.csv`, `images/` and a
 `README.txt`. Nothing in the folder needs this package or OMNIC to read. `read_unpacked(folder)` rebuilds the
 `OmnicMap` from those files. The layout is specified in docs/unpacked_format.md.
 
@@ -29,6 +29,7 @@ from .exports import (
     backgrounds_array,
     build_metadata,
     dataset_to_zarr,
+    import_optional,
     reader_version,
 )
 from .omnic import (
@@ -45,7 +46,8 @@ from .writers import save_images, save_points, save_spectra, write_json
 FORMAT_NAME = "ftir-map unpacked"
 FORMAT_VERSION = 1
 MAP_JSON = "map.json"
-SPECTRA_FORMATS = ("nc", "zarr", "csv")
+SPECTRA_FORMATS = ("zarr", "csv", "nc")  # nc is an opt-in export that needs the [netcdf] extra
+DEFAULT_SPECTRA = "zarr"
 SPECTRA_FILES = {"nc": "spectra.nc", "zarr": "spectra.zarr", "csv": "spectra.csv"}
 BACKGROUNDS_CSV = "backgrounds.csv"
 POINTS_CSV = "points.csv"
@@ -136,6 +138,7 @@ def _write_spectra(m: OmnicMap, folder: Path, spectra: str) -> str:
     elif spectra == "zarr":
         dataset_to_zarr(point_dataset(m), path, "w")
     else:
+        import_optional("h5netcdf", "netcdf", "netCDF output")
         dataset = point_dataset(m)
         dataset.to_netcdf(path, engine="h5netcdf", encoding=_netcdf_encoding(dataset))
     return path.name
@@ -210,8 +213,13 @@ _NC_HELP = [
     "background_index, and backgrounds (background, axis). Variables that the map did not record are absent.",
 ]
 _ZARR_HELP = [
-    "Open spectra.zarr with Python: xr.open_zarr('spectra.zarr'). It holds the same variables as spectra.nc would:",
-    "spectra (point, axis), x, y, z, grid_row, grid_column, title, time_s, background_index and backgrounds.",
+    "Open spectra.zarr (a folder) without this package:",
+    "  Python   import xarray as xr; ds = xr.open_zarr('spectra.zarr')   (or zarr.open('spectra.zarr'))",
+    "  R        Rarr::read_zarr_array('spectra.zarr/spectra')   (Rarr package)",
+    "  Julia    using Zarr; z = zopen('spectra.zarr'); z['spectra'][:, :]",
+    "  MATLAB or Excel: unpack again with --spectra csv.",
+    "Variables: spectra (point, axis), the axis itself with its unit, x, y, z, grid_row, grid_column, title, time_s,",
+    "background_index, and backgrounds (background, axis). Variables that the map did not record are absent.",
 ]
 _CSV_HELP = [
     "spectra.csv: the first column is the spectral axis, then one column per spectrum named by its index (the row",
@@ -237,7 +245,7 @@ def _clear_previous(folder: Path) -> None:
     """Remove the files this package writes, before an overwrite.
 
     A symbolic link (dangling or not) is removed as a link and never followed, so every file is then written fresh
-    inside `folder`; a shared folder whose spectra.nc or images/ points elsewhere cannot redirect the writes.
+    inside `folder`; a shared folder whose spectra.zarr or images/ points elsewhere cannot redirect the writes.
     """
     for name in OWN_NAMES:
         target = folder / name
@@ -253,7 +261,7 @@ def unpack_map(
     m: OmnicMap,
     folder: str | Path,
     *,
-    spectra: str = "nc",
+    spectra: str = DEFAULT_SPECTRA,
     png: bool = False,
     copy_source: bool = False,
     overwrite: bool = False,
@@ -261,7 +269,7 @@ def unpack_map(
 ) -> dict[str, Any]:
     """Write `m` as an unpacked-map folder (docs/unpacked_format.md) and return the content of its `map.json`.
 
-    `spectra` is "nc" (default), "zarr" or "csv". `png` adds PNG copies of the images in `images/png/`, and
+    `spectra` is "zarr" (default, writes spectra.zarr), "csv", or "nc" (netCDF4, needs the [netcdf] extra). `png` adds PNG copies of the images in `images/png/`, and
     `copy_source` copies the original .map file into `source/`. `map.json` is written last, so a folder without one
     is an unfinished write. `sha256` is the checksum of the source file, if the caller has it already.
 
@@ -367,7 +375,10 @@ def _open_spectra(folder: Path, meta: dict[str, Any]) -> xr.Dataset:
     kind, path = meta["files"]["spectra_format"], contained(folder, meta["files"]["spectra"])
     if kind == "csv":
         return _dataset_from_csv(folder, meta)
-    engine = "h5netcdf" if kind == "nc" else "zarr"
+    engine = "zarr"
+    if kind == "nc":
+        import_optional("h5netcdf", "netcdf", "reading spectra.nc")
+        engine = "h5netcdf"
     with xr.open_dataset(path, engine=engine, decode_times=False, decode_timedelta=False) as dataset:
         return dataset.load()
 

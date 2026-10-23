@@ -105,8 +105,7 @@ A plain dict of NumPy arrays, lists and dicts:
 
 ## `to_zarr(path, mode="w-")`
 
-Writes `to_xarray()` to a Zarr store. It needs the optional extra: `pip install "ftir-OMNIC-map-reader[zarr]"`, and
-raises an `ImportError` that says so otherwise. The default mode refuses to overwrite an existing store; pass
+Writes `to_xarray()` to a Zarr store. Zarr is a core dependency. The default mode refuses to overwrite an existing store; pass
 `mode="w"` to replace it. Read it back with `xarray.open_zarr(path)`; the result equals `to_xarray()`.
 
 ## `to_images()`
@@ -129,7 +128,7 @@ The writers below take the same `OmnicMap` and write files for other programs. E
 
 | Extra | Needed for |
 |---|---|
-| `[zarr]` | `.zarr` spectra |
+| `[zarr]` | none: zarr is a core dependency, the extra stays as an alias |
 | `[yaml]` | `.yaml` and `.yml` metadata (PyYAML) |
 | `[parquet]` | `.parquet` points (pyarrow) |
 | `[netcdf]` | `.nc` spectra (h5netcdf and h5py) |

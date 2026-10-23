@@ -28,20 +28,19 @@ authors = [
 ]
 
 dependencies = [
-    "h5netcdf>=1.3",  # wheels only, no libnetcdf: the spectra.nc of an unpacked map
-    "h5py>=3.8",
     "matplotlib>=3.10.1",
     "numpy >= 1.26",
     "pandas>=2",
     "pillow>=10",
     "xarray>=2024.6",
+    "zarr>=2.18",  # zarr 2.18 on Python 3.10, zarr 3 from 3.11: the spectra.zarr of an unpacked map
 ]
 
 [project.optional-dependencies]
-zarr = ["zarr>=2.18"]
+zarr = []  # alias kept for compatibility: zarr is a core dependency
 yaml = ["pyyaml>=6"]
 parquet = ["pyarrow>=14"]
-netcdf = ["h5netcdf>=1.3", "h5py>=3.8"]  # alias kept for compatibility: both are core dependencies now
+netcdf = ["h5netcdf>=1.3", "h5py>=3.8"]  # wheels only, no libnetcdf: opt-in spectra.nc
 
 [project.scripts]
 ftir-map = "ftir_map.cli:main"
@@ -66,7 +65,8 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.2",
     "ty>=0.0.91",
-    "zarr>=2.18",
+    "h5netcdf>=1.3",
+    "h5py>=3.8",
     "pyyaml>=6",
     "pyarrow>=14",
     "types-pyyaml",

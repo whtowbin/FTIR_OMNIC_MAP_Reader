@@ -283,9 +283,9 @@ class OmnicMap:
         return export_all(self, folder, spectra, metadata, points, images, overwrite)
 
     def unpack(self, folder: str | Path, **options) -> dict:
-        """Write an open, documented folder (map.json, spectra.nc, points.csv, images) that `read_unpacked` loads back.
+        """Write an open, documented folder (map.json, spectra.zarr, points.csv, images) that `read_unpacked` loads back.
 
-        Options: `spectra` ("nc", "zarr" or "csv"), `png`, `copy_source`, `overwrite`. See docs/unpacked_format.md.
+        Options: `spectra` ("zarr" by default, "csv", or "nc" with the [netcdf] extra), `png`, `copy_source`, `overwrite`. See docs/unpacked_format.md.
         """
         from .unpacked import unpack_map
 
