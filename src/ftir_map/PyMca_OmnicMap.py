@@ -31,6 +31,15 @@ __author__ = "V.A. Sole - ESRF"
 __contact__ = "sole@esrf.fr"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
+import warnings as _warnings
+
+_warnings.warn(
+    "ftir_map.PyMca_OmnicMap is deprecated and will be removed in ftir-OMNIC-map-reader 2.0. "
+    "Use ftir_map.read_omnic (or Load_Omnic_Map) instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 import os
 import sys
 import re

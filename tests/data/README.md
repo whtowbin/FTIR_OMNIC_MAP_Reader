@@ -2,17 +2,17 @@
 
 These are copies of research data from Henry Towbin's GCB xenolith FTIR session (Bristol, January 2017), from the project `Ch3_Xenolith_SIMS_Clean`. They cover each container layout and map kind. Henry approves the exact set before any release.
 
-The tests in `tests/test_omnic.py` skip any file that is missing. The array-detector map is not copied here: it is already in the repo at `src/ftir_map/921005-6-plaig2-1p-array-1.map` (7.1 MB, 2025).
-
+The tests in `tests/test_omnic.py` skip any file that is missing. 
 | File | Size | sha256 | Tests |
 |---|---|---|---|
 | `GCB_1C_GC52_CPX best points-50x50um_256avg.map` | 3.67 MB | `aebe43ebab3a60b7b8d41e01d4fcff811f5abe89471b8acd0dcc8d15f6ed3046` | classic layout ("Spectral Data File"), point-to-point map (6 points), stage Z, 2 video images |
 | `GCB_1C_ol54_ultrafast map_75um aperture and step.map` | 0.83 MB | `0a09ffd5e05d982aa348f5a09407d6ea61f2cefd0e07a78c21a64e6dce95c980` | extended layout, 11 × 13 grid, 432-point spectra, 6 JPEG mosaic tiles |
 | `GCB_4_Region 2_grain2_profile 2 50x100um mosaic image test.map` | 0.71 MB | `c578da67dea90d206bd117ce65a6bafd22c7c644695acd2eea5d084be035e103` | extended layout, line scan (21 points, 50 µm step), 6 JPEG mosaic tiles |
 | `test file GCB_1C_GC52_opx profile1_50x50um_25um step (overlapping points)_256 averages_Ifg.map` | 2.22 MB | `fe586af8c6d1155c4607d3f3ea5ddf7e7474b7e26bbe5d83bedc9dce737daae4` | interferogram map (12 × 8192 points), dates as spectrum titles |
+| `921005-6-plaig2-1p-array-1.map` | 7.1 MB | `67c6f57a167be37c3f50e9acc8a493025ea1b922039dddc9035b63e648df504e` | array-detector map (2025): extended layout, 43 × 31 grid of 853-point spectra, 16 backgrounds, titles with X= and Y= positions. Moved here from `src/ftir_map/` in 1.1 so that the wheel holds no data |
 | `cpx52_best_points_csv/*.CSV` (6 spectra and the background) | 7 × 50 kB | see below | OMNIC's own exports of the point map: the ground truth for the decoded spectra |
 
-Total size: 7.4 MB.
+Total size: 14.5 MB. None of these files is in the wheel or the sdist (see `pyproject.toml`).
 
 ## Source paths
 

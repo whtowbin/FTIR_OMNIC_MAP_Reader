@@ -1,10 +1,11 @@
 """Read Thermo OMNIC .map files by walking the file's block directory.
 
-`read_omnic(path)` returns an `OmnicMap`: spectra, wavenumber axis, stage positions, map kind, backgrounds, video or
+`read_omnic(path)` returns an `OmnicMap`: spectra, spectral axis, stage positions, map kind, backgrounds, video or
 mosaic images with their stage extents, and the collection metadata that could be decoded. The file layout, the block
-table and which fields are verified are described in docs/file_format.md.
+table and which fields are verified are described in docs/file_format.md. The export methods of `OmnicMap`
+(`to_xarray`, `to_numpy`, `to_dict`, `to_zarr`, `to_images`) live in `ftir_map.exports`.
 
-This module needs only numpy and the standard library. It does not use the PyMca-derived readers.
+Reading needs only numpy and the standard library. It does not use the PyMca-derived readers.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import datetime as _dt
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -49,6 +51,7 @@ SERIES_RECORD_PAD = 4  # extended layout: 4 bytes between each spectrum header a
 POINT_SCALAR, POINT_XY, POINT_RECT = 1, 2, 4
 
 X_UNITS = {1: "cm-1", 2: "data points"}
+AXIS_UNIT_NAMES = {"cm-1": "cm-1", "data points": "points"}  # x_units -> OmnicMap.axis_unit
 # y-units code -> data kind; only the codes seen in the test files are mapped
 DATA_KINDS = {17: "absorbance", 16: "transmittance", 15: "single_beam", 22: "interferogram"}
 MAP_DEFINITION_KINDS = {1: "points", 2: "line", 3: "area"}
@@ -116,7 +119,7 @@ class StageImage:
     data: bytes = field(repr=False)  # the embedded image file
     width: int | None
     height: int | None
-    extent: tuple[float, float, float, float] | None  # (x0, y0, x1, y1) stage um; image orientation UNVERIFIED
+    extent: tuple[float, float, float, float] | None  # (x0, y0, x1, y1) stage um, as stored in the file
 
     @property
     def pixel_size_um(self) -> tuple[float, float] | None:
@@ -124,6 +127,18 @@ class StageImage:
             return None
         x0, y0, x1, y1 = self.extent
         return abs(x1 - x0) / self.width, abs(y1 - y0) / self.height
+
+    @property
+    def stage_extent(self) -> tuple[float, float, float, float] | None:
+        """(xmin, xmax, ymin, ymax) in stage um, the order matplotlib's `imshow(..., origin="upper")` expects.
+
+        The decoded image is already upright: its left edge is xmin and its top row is ymax (stage Y increases upward
+        in OMNIC's display). No flip or rotation is needed. See docs/file_format.md, section 8.
+        """
+        if self.extent is None:
+            return None
+        x0, y0, x1, y1 = self.extent
+        return min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
 
 
 @dataclass
@@ -159,7 +174,8 @@ class OmnicMap:
 
     path: Path
     layout: str  # "classic" or "extended"
-    wavenumber: np.ndarray  # (n_wn,) float64; ascending for cm-1 data; for interferograms the stored point index
+    axis: np.ndarray  # (n_axis,) float64; ascending cm-1 for spectra; the stored point index for interferograms
+    axis_unit: str  # "cm-1", or "points" for interferograms (other codes are kept as read)
     spectra: np.ndarray  # (n_points, n_wn) float32 as stored (non-finite values kept)
     x: np.ndarray  # (n_points,) stage X in um (float32 values as stored, held as float64); NaN if absent
     y: np.ndarray
@@ -185,10 +201,47 @@ class OmnicMap:
     def n_points(self) -> int:
         return self.spectra.shape[0]
 
+    @property
+    def wavenumber(self) -> np.ndarray:
+        """The spectral axis in cm-1. Raises ValueError for interferogram maps; use `axis` there."""
+        if self.axis_unit != "cm-1":
+            raise ValueError(f"{self.path.name}: the axis is in {self.axis_unit}, not cm-1; use .axis")
+        return self.axis
+
     def block_bytes(self, key: int, index: int | None = None) -> list[bytes]:
         """Raw contents of the blocks with this key (and index), for fields this reader does not decode."""
         data = self.path.read_bytes()
         return [data[b.offset : b.offset + b.size] for b in self.blocks if b.key == key and index in (None, b.index)]
+
+    def to_xarray(self):
+        """Dataset with `spectra` on (y, x, axis) for grid maps or (point, axis) otherwise. See docs/exports.md."""
+        from .exports import to_xarray
+
+        return to_xarray(self)
+
+    def to_numpy(self):
+        """(spectra, axes, positions, metadata) as NumPy arrays and plain dicts. See docs/exports.md."""
+        from .exports import to_numpy
+
+        return to_numpy(self)
+
+    def to_dict(self) -> dict:
+        """Everything in the map as plain Python and NumPy objects. See docs/exports.md."""
+        from .exports import to_dict
+
+        return to_dict(self)
+
+    def to_zarr(self, path, mode: Literal["w", "w-"] = "w-") -> None:
+        """Write `to_xarray()` to a Zarr store. Needs the optional zarr extra."""
+        from .exports import to_zarr
+
+        to_zarr(self, path, mode)
+
+    def to_images(self):
+        """Video images and mosaic tiles as upright RGB arrays with their stage extents. See docs/exports.md."""
+        from .exports import to_images
+
+        return to_images(self)
 
     def spectra_grid(self) -> np.ndarray:
         """Spectra as (n_rows, n_columns, n_wn), NaN where a grid cell has no spectrum. Grid maps only."""
@@ -483,9 +536,9 @@ def read_omnic(path) -> OmnicMap:
     except OmnicFormatError as e:
         raise OmnicFormatError(f"{path.name}: {e}") from None
     spectra = np.vstack(spectra).astype(np.float32)
-    wavenumber = _axis(collection)
-    if collection.x_units == "cm-1" and wavenumber[0] > wavenumber[-1]:
-        wavenumber, spectra = wavenumber[::-1].copy(), spectra[:, ::-1].copy()
+    axis = _axis(collection)
+    if collection.x_units == "cm-1" and axis[0] > axis[-1]:
+        axis, spectra = axis[::-1].copy(), spectra[:, ::-1].copy()
 
     titles = [_cstring(h, 16, 64) for h in heads]
     point_arrays = parse_point_arrays(data, blocks)
@@ -498,7 +551,8 @@ def read_omnic(path) -> OmnicMap:
     return OmnicMap(
         path=path,
         layout=layout,
-        wavenumber=wavenumber,
+        axis=axis,
+        axis_unit=AXIS_UNIT_NAMES.get(collection.x_units, collection.x_units),
         spectra=spectra,
         x=x,
         y=y,

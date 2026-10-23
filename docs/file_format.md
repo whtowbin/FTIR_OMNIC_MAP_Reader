@@ -66,7 +66,7 @@ The first entry of the extended line scan `GCB_1C_GC52_CPX profile ... 256 avg.m
 | 0x03 | 0 | 4·n | background single-beam spectrum, float32 | yes | verified against OMNIC's background CSV export |
 | 0x03 | 1..n | 4·n | classic layout: spectrum i | yes | verified (CSV and SPA exports) |
 | 0x06 | 1 | 6 + 8·n + 2 | stage (x, y) of every spectrum, float32 µm | yes | verified: matches the X=/Y= titles of array maps to 0.003 µm, and the profile step sizes in the file names |
-| 0x06 | 2 | 6 + 16·m + 2 | one stage rectangle (x0, y0, x1, y1) per video image or mosaic tile | extent yes, orientation no | consistent: the count matches the image count in 81/81 files, and every image gives 0.581 × 0.589 µm/px |
+| 0x06 | 2 | 6 + 16·m + 2 | one stage rectangle (x0, y0, x1, y1) per video image or mosaic tile | yes | consistent: the count matches the image count in 81/81 files, and every image gives 0.581 × 0.589 µm/px. Orientation verified (section 8) |
 | 0x06 | 3 | 6 + 4·n + 2 | per spectrum, the number of the background it was ratioed against | yes | consistent: the maximum equals the number of backgrounds − 1 (16 backgrounds on array maps, probably one per detector element) |
 | 0x06 | 4 | 6 + 4·n + 2 | classic only: stage Z (focus) per spectrum, µm | yes | consistent (also stored as doubles in 0x82) |
 | 0x1B | 1 | text | history ("Converted to absorbance y-axis units on ...") | yes | consistent |
@@ -196,12 +196,17 @@ Status: consistent.
 
 Each video image (0x93) or mosaic tile (0x14B) has a stage rectangle in key 6, index 2. That gives the pixel size: 0.581 × 0.589 µm per pixel on the 2017 instrument, and 0.544 × 0.539 µm on the 2025 array map.
 
-**Image orientation is not established.** The test sampled image brightness at the spectrum positions and correlated it with the Si–O overtone area, on 22 grid maps, under four flip hypotheses.
+**Image orientation (verified).** The images need no flip or rotation. Decoded with a normal image library (which handles the bottom-up BMP row order), the first pixel row is the largest stage Y and the first pixel column is the smallest stage X. `matplotlib`'s `imshow(array, extent=(xmin, xmax, ymin, ymax))` with the default `origin="upper"` places the image correctly. `OmnicMap.to_images()` returns exactly that.
 
-- The hypothesis "x not flipped, image top = larger stage y" won 10 times, and gave the two strongest correlations (−0.80 and −0.61).
-- The other three hypotheses won 12 times between them.
+How it was checked, against OMNIC's own screenshots (which draw the video image under axes labeled in stage µm, with Y increasing upward):
 
-This needs one check against OMNIC's own display before the images are used for registration.
+- The key-6 rectangle of `GCB-S6-profile1_.JPG`'s map (x 774.87 to 1284.87, y 15133.76 to 15537.76) equals the screenshot's axis limits.
+- The plot area of 11 screenshots, each with a map holding one BMP video image, was compared with the decoded image under four hypotheses: no flip, left-right, top-bottom and both. Pixel correlation with no flip was 0.88 to 0.99 and won in 11 of 11 cases. The best of the other three was 0.48 to 0.85.
+- The six JPEG mosaic tiles of `GCB Scoria grain 6_map ... 128 avg.map` were placed on a canvas by their rectangles and compared with the screenshot `GCB Scoria grain 6.JPG`: correlation 0.75 with no flip, 0.45 top-bottom, about 0 for the other two. So the tiles are also upright and the n-th tile belongs to the n-th rectangle.
+
+The test `tests/test_exports.py::test_image_orientation_against_omnic_screenshot` repeats the first comparison when `FTIR_OMNIC_MAP_DIRS` points at the Bristol 2017 folder; a synthetic bottom-up BMP covers the decoding order everywhere.
+
+An earlier attempt that correlated image brightness with the Si-O overtone area could not decide, because the images are dark and vignetted; the screenshots settle it.
 
 ## 9. PyMca `OmnicMap.py` constants and what they locate
 

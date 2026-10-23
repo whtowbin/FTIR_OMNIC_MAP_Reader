@@ -3,14 +3,19 @@
 Grid maps (including array-detector maps whose pixels fill a grid) come back as before: spectra on (y, x, wn)
 with x and y relative to the first column and row, and the PyMca-style metadata in attrs. Line scans,
 point-to-point maps and irregular maps, which used to fail, come back per point on (point, wn).
+
+This is the compatibility layer: it keeps PyMca's NaN-to-zero replacement and metadata layout so old outputs stay
+identical. New code should use `ftir_map.read_omnic`, which keeps NaN as stored and offers more exports.
 """
 
+import warnings
 from typing import Literal, overload
 
 import numpy
 import xarray as xr
 
-from .omnic import OmnicMap, read_omnic
+from .exports import grid_axis_values
+from .omnic import OmnicFormatError, OmnicMap, read_omnic
 
 FORMATS = ("Xarray-Dataset", "Xarray-DataArray", "Dictionary")
 UNIT_NAMES = {"x": "um", "y": "um", "wn": "cm^-1", "data": "absorbance"}
@@ -60,11 +65,6 @@ def _legacy_info(m: OmnicMap, n_rows: int, n_columns: int) -> dict:
     return info
 
 
-def _axis_values(v: numpy.ndarray, index: numpy.ndarray, n: int) -> numpy.ndarray:
-    """Mean stored position of each grid column (or row)."""
-    return numpy.array([v[index == k].mean() for k in range(n)])
-
-
 def _grid_dataset(m: OmnicMap) -> xr.Dataset:
     if m.grid_shape is None or m.grid_index is None:
         raise ValueError(f"{m.path.name}: a {m.map_kind} map has no regular grid")
@@ -72,16 +72,16 @@ def _grid_dataset(m: OmnicMap) -> xr.Dataset:
     spectra = numpy.where(numpy.isfinite(m.spectra), m.spectra, 0.0).astype(numpy.float32)  # as PyMca did
     cube = numpy.zeros((n_rows, n_columns, spectra.shape[1]), dtype=numpy.float32)
     cube[row, col] = spectra
-    xs, ys = _axis_values(m.x, col, n_columns), _axis_values(m.y, row, n_rows)
+    xs, ys = grid_axis_values(m.x, col, n_columns), grid_axis_values(m.y, row, n_rows)
     metadata = {"unit_names": UNIT_NAMES, "unit_long_names": UNIT_LONG_NAMES, **_legacy_info(m, n_rows, n_columns)}
-    coords = {"x": xs - xs[0], "y": ys - ys[0], "wn": m.wavenumber}
+    coords = {"x": xs - xs[0], "y": ys - ys[0], "wn": m.axis}
     return xr.Dataset(data_vars={"spectra": (["y", "x", "wn"], cube)}, coords=coords, attrs=metadata)
 
 
 def _point_dataset(m: OmnicMap) -> xr.Dataset:
     coords = {
         "point": numpy.arange(m.n_points),
-        "wn": m.wavenumber,
+        "wn": m.axis,
         "x": ("point", m.x - m.x[0]),
         "y": ("point", m.y - m.y[0]),
         "x_stage": ("point", m.x),
@@ -93,16 +93,16 @@ def _point_dataset(m: OmnicMap) -> xr.Dataset:
 
 
 @overload
-def Load_Omnic_Map(dir_path: str, format: Literal["Xarray-Dataset"] = ...) -> xr.Dataset: ...
+def Load_Omnic_Map(dir_path: str, format: Literal["Xarray-Dataset"] = ...) -> xr.Dataset | None: ...
 @overload
-def Load_Omnic_Map(dir_path: str, format: Literal["Xarray-DataArray"]) -> xr.DataArray: ...
+def Load_Omnic_Map(dir_path: str, format: Literal["Xarray-DataArray"]) -> xr.DataArray | None: ...
 @overload
-def Load_Omnic_Map(dir_path: str, format: Literal["Dictionary"]) -> dict: ...
+def Load_Omnic_Map(dir_path: str, format: Literal["Dictionary"]) -> dict | None: ...
 @overload
-def Load_Omnic_Map(dir_path: str, format: str) -> xr.Dataset | xr.DataArray | dict: ...
+def Load_Omnic_Map(dir_path: str, format: str) -> xr.Dataset | xr.DataArray | dict | None: ...
 
 
-def Load_Omnic_Map(dir_path: str, format: str = "Xarray-Dataset") -> xr.Dataset | xr.DataArray | dict:
+def Load_Omnic_Map(dir_path: str, format: str = "Xarray-Dataset") -> xr.Dataset | xr.DataArray | dict | None:
     """Load an OMNIC .map file.
 
     Args:
@@ -114,16 +114,20 @@ def Load_Omnic_Map(dir_path: str, format: str = "Xarray-Dataset") -> xr.Dataset 
     absolute stage positions in x_stage and y_stage; attrs["map_kind"] says which.
 
     Raises:
-        ValueError: on an unsupported format, or a file that is not an OMNIC map or holds no spectra
-            (ftir_map.omnic.OmnicFormatError is a ValueError).
+        ValueError: on an unsupported format.
 
     Returns:
         xr.Dataset, xr.DataArray or dict with keys data, x, y, wn and metadata (plus x_stage and y_stage for
-        per-point maps).
+        per-point maps). A file that cannot be read (not an OMNIC map, no spectra, missing) gives a warning and
+        None, as in version 1.0. `ftir_map.read_omnic` raises OmnicFormatError instead.
     """
     if format not in FORMATS:
         raise ValueError(f"Unsupported format: {format}. Supported formats are {', '.join(map(repr, FORMATS))}.")
-    m = read_omnic(dir_path)
+    try:
+        m = read_omnic(dir_path)
+    except (OmnicFormatError, OSError) as error:
+        warnings.warn(f"Unable to load {dir_path}: {error}", stacklevel=2)
+        return None
     dataset = _grid_dataset(m) if m.grid_shape is not None else _point_dataset(m)
     if format == "Xarray-Dataset":
         return dataset

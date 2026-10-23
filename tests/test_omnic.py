@@ -1,6 +1,7 @@
 """ftir_map.omnic.read_omnic on synthetic files (both container layouts) and on the real files in tests/data."""
 
 import datetime as dt
+import json
 import os
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from ftir_map.omnic import OmnicFormatError, grid_layout, read_omnic
 from .omnic_writer import write_map
 
 DATA = Path(__file__).parent / "data"
-BUNDLED_ARRAY_MAP = Path(__file__).parents[1] / "src" / "ftir_map" / "921005-6-plaig2-1p-array-1.map"
+ARRAY_MAP = DATA / "921005-6-plaig2-1p-array-1.map"
 N_WN = 37
 POINTS = [[556.36, 17357.45], [281.99, 17492.40], [291.36, 17130.62], [429.38, 17150.00]]
 LINE = [[411.15 + 11.9 * i, 17109.14 + 21.92 * i] for i in range(5)]
@@ -44,7 +45,9 @@ def test_layouts_and_map_kinds(tmp_path, layout, positions, kind, expected):
     np.testing.assert_array_equal(m.spectra, spectra(len(positions)))
     np.testing.assert_array_equal(m.x, as_stored(positions)[:, 0])
     np.testing.assert_array_equal(m.y, as_stored(positions)[:, 1])
-    np.testing.assert_allclose(m.wavenumber, np.linspace(650.0, 4000.0, N_WN), rtol=1e-6)
+    np.testing.assert_allclose(m.axis, np.linspace(650.0, 4000.0, N_WN), rtol=1e-6)
+    np.testing.assert_array_equal(m.axis, m.wavenumber)
+    assert m.axis_unit == "cm-1"
     assert m.titles[0] == f"Spectrum 1 of {len(positions)}"
     np.testing.assert_allclose(m.times_s, 90.0 * np.arange(len(positions)))
     assert m.data_kind == "absorbance"
@@ -109,7 +112,10 @@ def test_interferogram_is_flagged(tmp_path):
     m = read_omnic(path)
     assert m.data_kind == "interferogram"
     assert m.collection.x_units == "data points"
-    assert m.wavenumber[0] == N_WN - 1  # stored order kept: the axis is the point index, not a wavenumber
+    assert m.axis[0] == N_WN - 1  # stored order kept: the axis is the point index, not a wavenumber
+    assert m.axis_unit == "points"
+    with pytest.raises(ValueError, match="not cm-1"):
+        _ = m.wavenumber
 
 
 @pytest.mark.parametrize("layout", LAYOUTS)
@@ -148,7 +154,7 @@ def test_real_point_map_matches_omnic_csv_export():
     assert len(csvs) == 6
     for i, csv in enumerate(csvs):
         exported = np.loadtxt(csv, delimiter=",")
-        np.testing.assert_allclose(m.wavenumber, exported[:, 0], atol=1e-3)
+        np.testing.assert_allclose(m.axis, exported[:, 0], atol=1e-3)
         np.testing.assert_allclose(m.spectra[i], exported[:, 1], atol=5.01e-7)  # the CSV keeps 7 significant digits
     bkg = np.loadtxt(
         DATA / "cpx52_best_points_csv" / "GCB_1C_GC52_CPX best points-50x50um_256avgbkg1.CSV", delimiter=","
@@ -185,8 +191,8 @@ def test_real_interferogram_map():
     np.testing.assert_allclose(m.times_s[:3], [0.0, 4.0, 7.0])
 
 
-def test_bundled_array_detector_map():
-    m = read_omnic(BUNDLED_ARRAY_MAP)
+def test_real_array_detector_map():
+    m = read_omnic(real(ARRAY_MAP.name))
     assert (m.map_kind, m.grid_shape, m.spectra.shape) == ("array", (43, 31), (1333, 853))
     assert m.data_kind == "absorbance" and m.history.startswith("Converted to absorbance")
     title_xy = np.array([[float(t.split("X=")[1].split(",")[0]), float(t.split("Y=")[1])] for t in m.titles])
@@ -214,3 +220,10 @@ def test_library_sweep(path):
     if m.background_index is not None and m.backgrounds:
         assert m.background_index.max() < len(m.backgrounds)
     assert all(im.extent is not None for im in m.images)
+    spectra, _axes, positions, metadata = m.to_numpy()  # every export works on every readable file
+    assert spectra.shape[-1] == len(m.axis) and len(positions["x"]) == m.n_points
+    json.dumps(metadata)
+    dataset = m.to_xarray()
+    json.dumps(dataset.attrs)
+    np.testing.assert_array_equal(dataset["spectra"].values, spectra)
+    assert len(m.to_images()) == len(m.images)

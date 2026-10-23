@@ -51,6 +51,17 @@ def tiny_bmp(width=4, height=3):
     return header + pixels
 
 
+def marker_bmp(width=4, height=3):
+    """A bottom-up BMP whose displayed top-left pixel is red and displayed bottom-right pixel is blue, the rest black."""
+    row = (3 * width + 3) // 4 * 4
+    pixels = bytearray(row * height)
+    pixels[(height - 1) * row : (height - 1) * row + 3] = bytes([0, 0, 255])  # last stored row = top; BGR red
+    pixels[width * 3 - 3 : width * 3] = bytes([255, 0, 0])  # first stored row = bottom; BGR blue
+    header = b"BM" + struct.pack("<IHHI", 54 + len(pixels), 0, 0, 54)
+    header += struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(pixels), 0, 0, 0, 0)
+    return header + bytes(pixels)
+
+
 def map_definition(kind, x_range, y_range, step, title="synthetic map"):
     b = bytearray(1188)
     struct.pack_into("<4H", b, 0, 0x8D, 1148, 0, MAP_KIND_CODES[kind])
@@ -75,8 +86,11 @@ def write_map(
     images=(),
     history="",
     with_spectra=True,
+    z=None,
+    image_bmp=None,
 ):
-    """Write a map. `images` is a list of (x0, y0, x1, y1) rectangles, each given a tiny BMP video image."""
+    """Write a map. `images` is a list of (x0, y0, x1, y1) rectangles, each given a tiny BMP video image
+    (`image_bmp`, default a black one). `z` is written as the classic layout's stage-Z block."""
     spectra = np.asarray(spectra, dtype=np.float32)
     n, n_wn = spectra.shape
     titles = titles or [f"Spectrum {i + 1} of {n}" for i in range(n)]
@@ -87,11 +101,13 @@ def write_map(
     if images:
         blocks.append((6, 2, point_array(images, 4)))
     blocks.append((6, 3, point_array(np.zeros(n), 1)))
+    if z is not None:
+        blocks.append((6, 4, point_array(z, 1)))
     if kind:
         p = np.asarray(positions, dtype=float)
         blocks.append((0x82, 0, map_definition(kind, (p[0, 0], p[-1, 0]), (p[0, 1], p[-1, 1]), 25.0)))
     for i in range(len(images)):
-        bmp = tiny_bmp()
+        bmp = image_bmp or tiny_bmp()
         blocks.append((0x93, i + 1, struct.pack("<I", len(bmp)) + bmp))
     if history:
         blocks.append((0x1B, 1, history.encode("ascii") + b"\r\n\0"))

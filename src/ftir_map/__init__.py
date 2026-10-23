@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
+from .exports import ImageArray
 from .omnic import OmnicFormatError, OmnicMap, read_omnic
 
-__all__ = ["OmnicFormatError", "OmnicMap", "read_omnic"]
+__all__ = ["ImageArray", "OmnicFormatError", "OmnicMap", "read_omnic"]

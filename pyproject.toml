@@ -4,13 +4,25 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ftir-OMNIC-map-reader"
-version = "1.0.0"
-#dynamic = ["version"]
+version = "1.1.0"
 description = "Load Thermo OMNIC .map FTIR files into Python as xarray datasets"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = ["FTIR", "Hyperspectral"]
+keywords = ["FTIR", "Hyperspectral", "OMNIC", "Thermo", "spectroscopy", "xarray"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+]
 authors = [
   { name = "Henry Towbin", email = "24940778+whtowbin@users.noreply.github.com" },
 ]
@@ -18,21 +30,34 @@ authors = [
 dependencies = [
     "matplotlib>=3.10.1",
     "numpy >= 1.26",
+    "pillow>=10",
     "xarray>=2024.6",
 ]
+
+[project.optional-dependencies]
+zarr = ["zarr>=2.18"]
 
 [project.urls]
 Documentation = "https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader#readme"
 Source = "https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader"
+Issues = "https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader/issues"
+Changelog = "https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ftir_map"]
+# the wheel holds package code only: no data files, and not the scratch script
+exclude = ["*.map", "src/ftir_map/testpoint.py"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["tests/data", "src/*.egg-info", "dist", "TODO_local.md"]
 
 [dependency-groups]
 dev = [
+    "complexipy>=5",
     "pytest>=9.1.1",
     "ruff>=0.17.2",
     "ty>=0.0.91",
+    "zarr>=2.18",
 ]
 
 [tool.ruff]
@@ -50,6 +75,15 @@ extend-select = ["I", "B", "UP", "C90"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 12
+
+[tool.ty.src]
+# deprecated PyMca-derived code, removed in 2.0; the scratch script is not part of the wheel
+exclude = [
+    "src/ftir_map/PyMca_OmnicMap.py",
+    "src/ftir_map/PyMca_Array_OmnicMap.py",
+    "src/ftir_map/LoadOmnicArrayMAP.py",
+    "src/ftir_map/testpoint.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
