@@ -441,3 +441,15 @@ def test_project_rerun_never_touches_a_folder_named_by_a_tampered_catalog(librar
     unpack([library], project_dir, overwrite=True)
     assert (victim / "map.json").read_text() == "{}"
     assert all(".." not in r["name"] for r in open_project(project_dir).rows)
+
+
+def test_project_refuses_to_write_through_a_symlinked_maps_folder(library, tmp_path):
+    project_dir = tmp_path / "project"
+    unpack([library], project_dir)
+    elsewhere = tmp_path / "elsewhere"
+    (project_dir / "maps").rename(elsewhere)
+    (project_dir / "maps").symlink_to(elsewhere, target_is_directory=True)
+    before = sorted(p.relative_to(elsewhere) for p in elsewhere.rglob("*"))
+    with pytest.raises(ValueError, match="symbolic link"):
+        unpack([library], project_dir, overwrite=True)
+    assert sorted(p.relative_to(elsewhere) for p in elsewhere.rglob("*")) == before

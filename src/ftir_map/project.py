@@ -178,8 +178,20 @@ def _unpack_one(
     except UNREADABLE as error:
         reason = str(error).removeprefix(f"{path.name}: ")
         return skipped_row(name, path, sha256, reason), "skipped"
-    unpack_map(m, contained(project_dir / MAPS_DIR, name), overwrite=True, sha256=sha256, **options)
+    unpack_map(m, map_folder_for_writing(project_dir, name), overwrite=True, sha256=sha256, **options)
     return catalog_row(name, m, sha256), "unpacked"
+
+
+def map_folder_for_writing(project_dir: Path, name: str) -> Path:
+    """The folder a map is (re)written into, which may be cleared first.
+
+    Checked against the project root itself, and never through a symbolic link: a shared project whose `maps/`
+    or map folder is a link must not make an overwrite write or delete outside the project.
+    """
+    for link in (project_dir / MAPS_DIR, project_dir / MAPS_DIR / name):
+        if link.is_symlink():
+            raise ValueError(f"{link} is a symbolic link; refusing to write through it")
+    return contained(project_dir, Path(MAPS_DIR) / name)
 
 
 def unpack(
