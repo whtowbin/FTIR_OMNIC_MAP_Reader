@@ -3,6 +3,7 @@
 import csv
 import dataclasses
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -453,3 +454,28 @@ def test_project_refuses_to_write_through_a_symlinked_maps_folder(library, tmp_p
     with pytest.raises(ValueError, match="symbolic link"):
         unpack([library], project_dir, overwrite=True)
     assert sorted(p.relative_to(elsewhere) for p in elsewhere.rglob("*")) == before
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_overwrite_replaces_links_inside_a_map_folder_without_following_them(tmp_path, dangling):
+    folder = tmp_path / "unpacked"
+    m = grid_map(tmp_path)
+    m.unpack(folder)
+    outside_file, outside_dir = tmp_path / "outside.nc", tmp_path / "outside_images"
+    if not dangling:
+        outside_file.write_bytes(b"keep me")
+        outside_dir.mkdir()
+        (outside_dir / "keep.txt").write_text("keep")
+    (folder / "spectra.nc").unlink()
+    (folder / "spectra.nc").symlink_to(outside_file)
+    if (folder / "images").exists():
+        shutil.rmtree(folder / "images")
+    (folder / "images").symlink_to(outside_dir, target_is_directory=True)
+    m.unpack(folder, overwrite=True)
+    assert not (folder / "spectra.nc").is_symlink() and not (folder / "images").is_symlink()
+    if not dangling:
+        assert outside_file.read_bytes() == b"keep me"
+        assert [p.name for p in outside_dir.iterdir()] == ["keep.txt"]
+    else:
+        assert not outside_file.exists() and not outside_dir.exists()
+    read_unpacked(folder)

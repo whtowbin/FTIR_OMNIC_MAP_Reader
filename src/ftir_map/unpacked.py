@@ -234,9 +234,16 @@ def contained(base: str | Path, relative: str | Path) -> Path:
 
 
 def _clear_previous(folder: Path) -> None:
+    """Remove the files this package writes, before an overwrite.
+
+    A symbolic link (dangling or not) is removed as a link and never followed, so every file is then written fresh
+    inside `folder`; a shared folder whose spectra.nc or images/ points elsewhere cannot redirect the writes.
+    """
     for name in OWN_NAMES:
         target = folder / name
-        if target.is_dir():
+        if target.is_symlink():
+            target.unlink()
+        elif target.is_dir():
             shutil.rmtree(target)
         elif target.exists():
             target.unlink()
