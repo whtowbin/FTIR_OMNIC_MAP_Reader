@@ -65,12 +65,27 @@ def resolve_format(path: str | Path, format: str | None, supported: Iterable[str
     return name
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(value: Any) -> Any:
+    """One CSV field. None becomes empty; text that a spreadsheet would run as a formula gets a leading quote.
+
+    Titles and other strings come from the .map file, so they are untrusted. Numbers are written unchanged.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def _write_csv(path: Path, header: Iterable[str], rows: Iterable[Iterable[Any]]) -> None:
-    """CSV with a header row; None becomes an empty field."""
+    """CSV with a header row; see `csv_cell` for how fields are written."""
     with open(path, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-        writer.writerow(header)
-        writer.writerows(["" if value is None else value for value in row] for row in rows)
+        writer.writerow([csv_cell(name) for name in header])
+        writer.writerows([csv_cell(value) for value in row] for row in rows)
 
 
 def _write_json(path: Path, content: Any) -> None:

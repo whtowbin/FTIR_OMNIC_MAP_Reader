@@ -12,7 +12,7 @@ from PIL import Image
 
 from ftir_map import read_omnic
 from ftir_map.exports import build_metadata
-from ftir_map.writers import flatten_metadata, points_table, world_file_text
+from ftir_map.writers import csv_cell, flatten_metadata, points_table, world_file_text
 
 from .omnic_writer import marker_bmp
 from .test_exports import REAL_MAPS, grid_map, point_map
@@ -362,3 +362,30 @@ def test_cli_reports_errors_without_a_traceback(tmp_path):
 
 def test_cli_rejects_unknown_format():
     assert run_cli("export", "x.map", "--out", "y", "--spectra", "hdf").returncode == 2
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("=HYPERLINK(1)", "'=HYPERLINK(1)"),
+        ("+1", "'+1"),
+        ("-cmd", "'-cmd"),
+        ("@SUM(A1)", "'@SUM(A1)"),
+        ("\tx", "'\tx"),
+        ("Spectrum 1 of 336", "Spectrum 1 of 336"),
+        (-3.5, -3.5),
+        (None, ""),
+    ],
+)
+def test_csv_cell_escapes_formula_text_only(value, expected):
+    assert csv_cell(value) == expected
+
+
+def test_points_csv_escapes_untrusted_titles(tmp_path):
+    m = grid_map(tmp_path)
+    m.titles[0] = "=1+1"
+    out = tmp_path / "points.csv"
+    m.save_points(out)
+    with out.open(newline="", encoding="utf-8") as file:
+        first = next(csv.DictReader(file))
+    assert first["title"] == "'=1+1"
