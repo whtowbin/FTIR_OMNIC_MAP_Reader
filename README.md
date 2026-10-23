@@ -4,6 +4,8 @@ Read Thermo OMNIC `.map` files (FTIR maps, line scans and point lists) into Pyth
 It returns the spectra, the spectral axis, the stage position of every spectrum, the background spectra, the video or
 mosaic images with their stage coordinates, and the collection metadata that could be decoded.
 
+Documentation: <https://ftir-omnic-map-reader.readthedocs.io/>
+
 ## Install
 
 ```console
@@ -42,7 +44,7 @@ Interferogram maps (`m.data_kind == "interferogram"`) have `axis_unit == "points
 
 ## Exports
 
-Each export is described, with example output, in [docs/exports.md](docs/exports.md).
+Each export is described, with example output, in [docs/site/exports.md](docs/site/exports.md).
 
 ```python
 ds = m.to_xarray()  # xarray.Dataset, attrs hold the metadata
@@ -57,7 +59,7 @@ images = m.to_images()  # video images or mosaic tiles with stage extents
 ```python
 m.save_metadata("meta.json")  # or .yaml, .csv
 m.save_points("points.csv")  # one row per spectrum: x, y, z, row, column, title, time, background
-m.save_spectra("spectra.npz")  # or .csv, .nc, .zarr
+m.save_spectra("spectra.npz")  # or .csv, .zarr; .nc is opt-in ([netcdf] extra)
 m.save_images("images/", format="png")  # PNG or TIFF or the original files, plus world files and an index
 m.export_all("my_map_export/")  # all of the above in one folder with a README.txt
 ```
@@ -66,7 +68,7 @@ The same from the command line:
 
 ```console
 ftir-map info my_map.map
-ftir-map export my_map.map --out my_map_export --spectra nc --metadata yaml --images tiff
+ftir-map export my_map.map --out my_map_export --spectra npz --metadata yaml --images tiff
 ```
 
 Showing a video image with the map positions:
@@ -85,7 +87,7 @@ plt.plot(m.x, m.y, "r.")
 `xarray.open_zarr` or `zarr.open` in Python, and with the Zarr packages of R and Julia; use `--spectra csv` for MATLAB
 or Excel), `points.csv`, `map.json` with all metadata, and the embedded images with
 world files. Give it files and/or folders; it finds `.map` files recursively, lists unreadable ones in the catalog, and
-skips maps that are already unpacked. The format is in [docs/unpacked_format.md](docs/unpacked_format.md).
+skips maps that are already unpacked. The format is in [docs/site/unpacked_format.md](docs/site/unpacked_format.md).
 
 ```console
 ftir-map unpack "Bristol 2017/" other_map.map --out my_project [--spectra zarr|csv|nc] [--png] [--copy-source]
@@ -110,7 +112,7 @@ ftir_map.load("my_project/maps/my_map")  # also reads one unpacked map, a projec
 per-spectrum `m.titles`, `m.times_s` and `m.background_index`, and `m.backgrounds` (spectrum, title and time of each
 background). `m.block_bytes(key)` returns the raw bytes of any block this reader does not decode. The same metadata,
 as JSON-serializable values, is in `ds.attrs` and in the last item of `to_numpy()`. Which fields are verified against
-OMNIC's own exports, and which are inferred, is in [docs/file_format.md](docs/file_format.md).
+OMNIC's own exports, and which are inferred, is in [docs/site/file_format.md](docs/site/file_format.md).
 
 ## Older interface
 

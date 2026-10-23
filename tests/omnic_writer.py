@@ -1,4 +1,4 @@
-"""Write small synthetic OMNIC .map files with the block layout described in docs/file_format.md (test helper)."""
+"""Write small synthetic OMNIC .map files with the block layout described in docs/site/file_format.md (test helper)."""
 
 from __future__ import annotations
 

@@ -1,0 +1,20 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  mkdocs:
+    name: mkdocs build --strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Install the docs dependency group
+        run: uv sync --frozen --no-default-groups --group docs
+      - name: Build the site
+        run: uv run --frozen --no-sync mkdocs build --strict

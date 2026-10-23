@@ -2,6 +2,11 @@
 
 This page records what `ftir_map.omnic` knows about the Thermo OMNIC `.map` container. It was reverse-engineered from 81 files. No specification was used.
 
+!!! warning "Reverse-engineered, not an official specification"
+    Thermo has not published the `.map` format. Everything here was worked out by comparing files with OMNIC's own
+    exports, and each item is marked verified, consistent or unverified below. A file from another OMNIC version or
+    instrument may differ; `read_omnic` raises `OmnicFormatError` rather than guess.
+
 - 78 maps from a 2017 microscope session: grids, line scans, one point-to-point map and one interferogram map.
 - 3 maps from 2025: two array-detector maps and one plate map.
 - Two further 2017 files are mosaic-only and hold no spectra.

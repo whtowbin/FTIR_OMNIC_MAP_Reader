@@ -1,7 +1,7 @@
 """File writers for an `OmnicMap`: metadata, per-point table, spectra, images with world files, and a whole folder.
 
 Each function takes the `OmnicMap` first; `OmnicMap` has a method of the same name that calls it. The files are
-described, with examples, in docs/exports.md. The metadata written is always `exports.build_metadata`, so JSON, YAML,
+described, with examples, in docs/site/exports.md. The metadata written is always `exports.build_metadata`, so JSON, YAML,
 CSV, netCDF and NPZ carry the same content as `to_xarray().attrs`.
 """
 
@@ -29,7 +29,7 @@ from .exports import (
 from .omnic import StageImage
 
 FORMAT_ALIASES = {"yml": "yaml", "tif": "tiff", "jpg": "jpeg"}
-ORIENTATION_VERIFIED = True  # docs/file_format.md, section 8: decoded images are upright, stage Y up
+ORIENTATION_VERIFIED = True  # docs/site/file_format.md, section 8: decoded images are upright, stage Y up
 ORIGINAL_SUFFIX = {"BMP": ".bmp", "JPEG": ".jpg"}
 WORLD_SUFFIX = {"PNG": ".pgw", "TIFF": ".tfw", "BMP": ".bpw", "JPEG": ".jgw"}
 IMAGE_FORMATS = ("png", "tiff", "original")
@@ -323,7 +323,10 @@ def save_images(m, folder: str | Path, format: str = "png") -> list[dict[str, An
 def _readme_text(m, names: dict[str, str]) -> str:
     lines = [f"Export of {m.path.name} ({m.map_kind} map, {m.n_points} spectra) by ftir-OMNIC-map-reader.", ""]
     lines += [f"{name}: {description}" for name, description in names.items()]
-    lines += ["", "Positions are stage coordinates in um. Format details: docs/exports.md in the package repository."]
+    lines += [
+        "",
+        "Positions are stage coordinates in um. Format details: docs/site/exports.md in the package repository.",
+    ]
     return "\n".join(lines) + "\n"
 
 

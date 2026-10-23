@@ -1,7 +1,7 @@
 """Exports of an `OmnicMap`: xarray, NumPy, plain dict, Zarr and the stage-registered images.
 
 Each function takes the `OmnicMap` as its first argument; `OmnicMap` has a method of the same name that calls it.
-The structure of every export is described in docs/exports.md.
+The structure of every export is described in docs/site/exports.md.
 
 The exports keep NaN exactly as stored in the file. Only the compatibility layer `Load_Omnic_Map` replaces NaN by 0.
 """
@@ -284,7 +284,7 @@ def dataset_to_zarr(dataset: xr.Dataset, path: str | Path, mode: Literal["w", "w
 def to_images(m: OmnicMap) -> list[ImageArray]:
     """Video images (BMP) or mosaic tiles (JPEG) as upright RGB arrays with their stage extents.
 
-    Orientation was checked against OMNIC's own screenshots (docs/file_format.md, section 8): the decoded images need
+    Orientation was checked against OMNIC's own screenshots (docs/site/file_format.md, section 8): the decoded images need
     no flip, and the extent is (xmin, xmax, ymin, ymax) for `imshow(array, extent=extent)` with the default
     `origin="upper"`.
     """

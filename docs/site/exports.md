@@ -1,7 +1,24 @@
-# Exports of an `OmnicMap`
+# Exports
 
 All examples use `tests/data/GCB_1C_ol54_ultrafast map_75um aperture and step.map` (an 11 x 13 grid of 432-point
 spectra) and `GCB_1C_GC52_CPX best points-50x50um_256avg.map` (6 points). Every export keeps NaN as stored.
+
+Everything on this page starts from an `OmnicMap`, and each method is also a plain function in `ftir_map.exports` or
+`ftir_map.writers` that takes the map first.
+
+```python
+from ftir_map import read_omnic
+
+m = read_omnic("my_map.map")
+ds = m.to_xarray()  # xarray.Dataset, attrs hold the metadata
+spectra, axes, positions, metadata = m.to_numpy()  # arrays and plain dicts
+everything = m.to_dict()  # spectra, axes, positions, titles, times, backgrounds, images
+m.to_zarr("my_map.zarr")  # refuses to overwrite by default
+images = m.to_images()  # video images or mosaic tiles with stage extents
+print(ds.sizes)  # Frozen({'y': 13, 'x': 11, 'wavenumber': 432, 'background': 1})
+```
+
+The files these write are covered under [Writing files](#writing-files) below.
 
 The spectral dimension is named `wavenumber` for spectra (cm-1) and `axis` for interferogram maps (data points).
 
@@ -119,10 +136,10 @@ Returns a list of `ImageArray(index, format, array, extent)`:
 - `format` is `"BMP"` for a video image (878 x 686 px) and `"JPEG"` for a mosaic tile; the tiles of one map share a
   coordinate system and are placed by their extents.
 
-The orientation was verified against OMNIC's screenshots (docs/file_format.md, section 8). A map without images gives
+The orientation was verified against OMNIC's screenshots ([File format notes](file_format.md#8-images-and-registration)). A map without images gives
 an empty list.
 
-# Writing files
+## Writing files
 
 The writers below take the same `OmnicMap` and write files for other programs. Examples use `tests/data/GCB_1C_ol54_ultrafast map_75um aperture and step.map` (13 x 11 grid, 143 spectra, 6 mosaic tiles). The optional formats need an extra, and raise an `ImportError` that names it:
 
@@ -131,11 +148,25 @@ The writers below take the same `OmnicMap` and write files for other programs. E
 | `[zarr]` | none: zarr is a core dependency, the extra stays as an alias |
 | `[yaml]` | `.yaml` and `.yml` metadata (PyYAML) |
 | `[parquet]` | `.parquet` points (pyarrow) |
-| `[netcdf]` | `.nc` spectra (h5netcdf and h5py) |
+| `[netcdf]` | `.nc` spectra (h5netcdf and h5py); netCDF is opt-in and never the default |
 
 The format comes from the file extension unless `format=` is given. Each method is also a function in `ftir_map.writers`.
 
-## `save_metadata(path, format=None)`
+```python
+m.save_metadata("meta.json")  # or .yaml, .csv
+m.save_points("points.csv")  # one row per spectrum: x, y, row, column, title, time, background
+m.save_spectra("spectra.npz")  # or .csv, .zarr; .nc is opt-in and needs the [netcdf] extra
+m.save_images("images", format="png")  # PNG, TIFF or the original files, plus world files and an index
+m.export_all("my_map_export")  # all of the above in one folder with a README.txt
+```
+
+!!! note "CSV and spreadsheets"
+    Titles and other text in a CSV come from the `.map` file, so they are untrusted input. Every CSV field that
+    starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'`, so that Excel and similar programs
+    show it as text instead of running it as a formula. Numbers are written unchanged. `read_unpacked` removes the
+    quote again when it reads an unpacked `points.csv` back.
+
+### `save_metadata(path, format=None)`
 
 Writes the dict that is in `to_xarray().attrs` (see "attrs" above), without the raw header bytes. JSON, YAML and CSV hold the same content.
 
@@ -160,7 +191,7 @@ collection.n_sample_scans,1
 map_definition.x_range[0],1124.2786262686
 ```
 
-## `save_points(path, format=None)`
+### `save_points(path, format=None)`
 
 One row per spectrum in file order. Columns: `index`, `x_um`, `y_um`, `z_um` (only when the file records it), `row` and `column` (grid and array maps), `title`, `time_s`, `background_index` (only when recorded). Non-finite numbers are empty in CSV and `null` in JSON.
 
@@ -177,7 +208,7 @@ index,x_um,y_um,row,column,title,time_s,background_index
 
 The `row` and `column` columns link a spectrum to its cell in the `(y, x)` grid of `to_xarray()`. They tie `spectra.csv` columns (named by `index`) to grid positions.
 
-## `save_spectra(path, format=None)`
+### `save_spectra(path, format=None)`
 
 An existing file or Zarr store at `path` is replaced.
 
@@ -189,10 +220,10 @@ wavenumber_cm-1,0,1,2,3
 ```
 
 - `.npz`: arrays in file order: `spectra` `(n_points, n_axis)`, `axis`, `x`, `y`, `z` (when recorded), `grid_index` `(n_points, 2)` (grid maps) and `metadata`, the JSON text of the metadata. Read it with `np.load(path)` and `json.loads(str(npz["metadata"]))`; no pickle is used.
-- `.nc`: `to_xarray()` as NetCDF4, read back with `xarray.open_dataset(path)`. NetCDF attributes cannot be nested, so the metadata is one attribute, `metadata_json`. The backend is h5netcdf: it installs from wheels with h5py and needs no system netCDF library, while netCDF4 would add a compiled library for no gain here.
+- `.nc` (opt-in, needs the `[netcdf]` extra): `to_xarray()` as NetCDF4, read back with `xarray.open_dataset(path)`. NetCDF attributes cannot be nested, so the metadata is one attribute, `metadata_json`. The backend is h5netcdf: it installs from wheels with h5py and needs no system netCDF library, while netCDF4 would add a compiled library for no gain here.
 - `.zarr`: `to_zarr(path, mode="w")`.
 
-## `save_images(folder, format="png")`
+### `save_images(folder, format="png")`
 
 Writes `image_01`, `image_02`, ... for each video image or mosaic tile, each with a world file, plus an index. `format` is:
 
@@ -204,7 +235,7 @@ Writes `image_01`, `image_02`, ... for each video image or mosaic tile, each wit
 
 An image is decoded only in the format its block declares (BMP or JPEG). A map without images writes nothing and returns `[]`; otherwise the function returns the index records.
 
-The world file has six lines, in stage um: pixel size in x, 0, 0, minus the pixel size in y, and x and y of the upper-left pixel centre (half a pixel inside the corner `xmin`, `ymax`). The images are upright (docs/file_format.md, section 8), so this places them in ImageJ, QGIS and similar programs. The stage coordinate system has no projection. Images with no stage rectangle get no world file.
+The world file has six lines, in stage um: pixel size in x, 0, 0, minus the pixel size in y, and x and y of the upper-left pixel centre (half a pixel inside the corner `xmin`, `ymax`). The images are upright ([File format notes](file_format.md#8-images-and-registration)), so this places them in ImageJ, QGIS and similar programs. The stage coordinate system has no projection. Images with no stage rectangle get no world file.
 
 ```
 0.580865673161
@@ -224,7 +255,7 @@ image_01.png,1,JPEG,878,686,989.27,1499.27,19344.25,19748.25,0.5809,0.5889,image
 
 `orientation_verified` is `True` for every image, since the orientation was checked against OMNIC's screenshots.
 
-## `export_all(folder, spectra="zarr", metadata="json", points="csv", images="png", overwrite=False)`
+### `export_all(folder, spectra="zarr", metadata="json", points="csv", images="png", overwrite=False)`
 
 Writes one self-describing folder and returns its path:
 
@@ -241,10 +272,4 @@ out/
 
 ## Command line
 
-```console
-ftir-map info FILE
-ftir-map export FILE --out DIR [--spectra zarr|nc|npz|csv] [--metadata json|yaml|csv]
-                [--points csv|parquet|json] [--images png|tiff|original|none] [--overwrite]
-```
-
-`info` prints the map kind, number of points, axis range, data kind, number of images and key collection parameters. `export` calls `export_all`. Errors print one line to stderr and exit with status 1.
+`ftir-map export FILE --out DIR` calls `export_all`; see [Command line](cli.md).

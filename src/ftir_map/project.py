@@ -2,7 +2,7 @@
 
 The folder holds `maps/<name>/` (one unpacked map each, see unpacked.py), `catalog.csv` for a spreadsheet and
 `catalog.json` for programs. Re-running `unpack` skips every map that is already unpacked from the same file content.
-The layout is specified in docs/unpacked_format.md.
+The layout is specified in docs/site/unpacked_format.md.
 """
 
 from __future__ import annotations
@@ -267,7 +267,7 @@ class Project:
 
     @property
     def catalog(self):
-        """One row per source file as a pandas DataFrame (see docs/unpacked_format.md for the columns)."""
+        """One row per source file as a pandas DataFrame (see docs/site/unpacked_format.md for the columns)."""
         import pandas
 
         return pandas.DataFrame.from_records(self.rows, columns=CATALOG_COLUMNS)

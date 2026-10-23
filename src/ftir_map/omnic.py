@@ -2,7 +2,7 @@
 
 `read_omnic(path)` returns an `OmnicMap`: spectra, spectral axis, stage positions, map kind, backgrounds, video or
 mosaic images with their stage extents, and the collection metadata that could be decoded. The file layout, the block
-table and which fields are verified are described in docs/file_format.md. The export methods of `OmnicMap`
+table and which fields are verified are described in docs/site/file_format.md. The export methods of `OmnicMap`
 (`to_xarray`, `to_numpy`, `to_dict`, `to_zarr`, `to_images`) live in `ftir_map.exports`; the file writers
 (`save_metadata`, `save_points`, `save_spectra`, `save_images`, `export_all`) live in `ftir_map.writers`.
 
@@ -15,7 +15,7 @@ import datetime as _dt
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
@@ -134,7 +134,7 @@ class StageImage:
         """(xmin, xmax, ymin, ymax) in stage um, the order matplotlib's `imshow(..., origin="upper")` expects.
 
         The decoded image is already upright: its left edge is xmin and its top row is ymax (stage Y increases upward
-        in OMNIC's display). No flip or rotation is needed. See docs/file_format.md, section 8.
+        in OMNIC's display). No flip or rotation is needed. See docs/site/file_format.md, section 8.
         """
         if self.extent is None:
             return None
@@ -215,37 +215,37 @@ class OmnicMap:
         return [data[b.offset : b.offset + b.size] for b in self.blocks if b.key == key and index in (None, b.index)]
 
     def to_xarray(self):
-        """Dataset with `spectra` on (y, x, axis) for grid maps or (point, axis) otherwise. See docs/exports.md."""
+        """Dataset with `spectra` on (y, x, axis) for grid maps or (point, axis) otherwise. See docs/site/exports.md."""
         from .exports import to_xarray
 
         return to_xarray(self)
 
     def to_numpy(self):
-        """(spectra, axes, positions, metadata) as NumPy arrays and plain dicts. See docs/exports.md."""
+        """(spectra, axes, positions, metadata) as NumPy arrays and plain dicts. See docs/site/exports.md."""
         from .exports import to_numpy
 
         return to_numpy(self)
 
     def to_dict(self) -> dict:
-        """Everything in the map as plain Python and NumPy objects. See docs/exports.md."""
+        """Everything in the map as plain Python and NumPy objects. See docs/site/exports.md."""
         from .exports import to_dict
 
         return to_dict(self)
 
     def to_zarr(self, path, mode: Literal["w", "w-"] = "w-") -> None:
-        """Write `to_xarray()` to a Zarr store. Needs the optional zarr extra."""
+        """Write `to_xarray()` to a Zarr store. `mode="w-"` refuses to overwrite an existing store; `"w"` replaces it."""
         from .exports import to_zarr
 
         to_zarr(self, path, mode)
 
     def to_images(self):
-        """Video images and mosaic tiles as upright RGB arrays with their stage extents. See docs/exports.md."""
+        """Video images and mosaic tiles as upright RGB arrays with their stage extents. See docs/site/exports.md."""
         from .exports import to_images
 
         return to_images(self)
 
     def save_metadata(self, path: str | Path, format: str | None = None) -> None:
-        """Write the metadata as JSON, YAML or CSV (format from the extension). See docs/exports.md."""
+        """Write the metadata as JSON, YAML or CSV (format from the extension). See docs/site/exports.md."""
         from .writers import save_metadata
 
         save_metadata(self, path, format)
@@ -282,10 +282,16 @@ class OmnicMap:
 
         return export_all(self, folder, spectra, metadata, points, images, overwrite)
 
-    def unpack(self, folder: str | Path, **options) -> dict:
+    def unpack(self, folder: str | Path, **options: Any) -> dict:
         """Write an open, documented folder (map.json, spectra.zarr, points.csv, images) that `read_unpacked` loads back.
 
-        Options: `spectra` ("zarr" by default, "csv", or "nc" with the [netcdf] extra), `png`, `copy_source`, `overwrite`. See docs/unpacked_format.md.
+        Args:
+            folder: the folder to write.
+            **options: `spectra` ("zarr" by default, "csv", or "nc" with the [netcdf] extra), `png`, `copy_source`
+                and `overwrite`. See `unpack_map` and docs/site/unpacked_format.md.
+
+        Returns:
+            The content of the written `map.json`.
         """
         from .unpacked import unpack_map
 

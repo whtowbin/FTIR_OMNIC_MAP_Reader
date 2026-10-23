@@ -9,7 +9,7 @@
   `points.csv`, the embedded images byte for byte with world files, and a `README.txt`. `catalog.csv` and
   `catalog.json` list every source file; unreadable files (such as mosaic-only maps) are listed as skipped. Re-running
   skips maps that are already unpacked. Options: `--spectra zarr|csv|nc`, `--png`, `--copy-source`, `--overwrite`.
-  The format is in docs/unpacked_format.md.
+  The format is in docs/site/unpacked_format.md.
 - `read_unpacked(folder)` rebuilds the `OmnicMap` from an unpacked map (spectra bit for bit; the raw header bytes and
   block directory are not kept). `open_project(folder)` returns a `Project` with `catalog`, `names`, `load(name)` and
   `to_xarray(name)`. `ftir_map.load(path)` opens a `.map` file, an unpacked map or a project. `OmnicMap.unpack(folder)`.
@@ -33,15 +33,15 @@
   it cannot read.
 - `OmnicMap` holds the spectra, spectral axis, stage X, Y and Z, map kind, spectrum titles and times, backgrounds,
   video images and mosaic tiles with their stage extents, the collection parameters and the map definition.
-- Exports: `to_xarray()`, `to_numpy()`, `to_dict()`, `to_zarr(path)` and `to_images()`. See docs/exports.md.
+- Exports: `to_xarray()`, `to_numpy()`, `to_dict()`, `to_zarr(path)` and `to_images()`. See docs/site/exports.md.
 - File writers: `save_metadata()` (JSON, YAML or flattened CSV), `save_points()` (CSV, JSON or Parquet),
   `save_spectra()` (CSV, NPZ, netCDF or Zarr), `save_images()` (PNG, TIFF or the original BMP and JPEG files, each with
   a world file and an `images.json` / `images.csv` index) and `export_all()` (one self-describing folder with a
-  README.txt). See docs/exports.md.
+  README.txt). See docs/site/exports.md.
 - The `ftir-map` command: `ftir-map info FILE` and `ftir-map export FILE --out DIR`.
 - Optional extras: `[zarr]`, `[yaml]` (PyYAML), `[parquet]` (pyarrow) and `[netcdf]` (h5netcdf and h5py), for example
   `pip install "ftir-OMNIC-map-reader[zarr]"`.
-- docs/file_format.md describes the file format, and says which fields are verified.
+- docs/site/file_format.md describes the file format, and says which fields are verified.
 - Image orientation was checked against OMNIC's screenshots: the images are upright and need no flip.
 - Tests, including OMNIC's own CSV exports as ground truth, and GitHub Actions workflows for testing and publishing.
 

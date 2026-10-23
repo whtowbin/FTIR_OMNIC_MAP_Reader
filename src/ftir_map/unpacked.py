@@ -270,9 +270,16 @@ def unpack_map(
 ) -> dict[str, Any]:
     """Write `m` as an unpacked-map folder (docs/site/unpacked_format.md) and return the content of its `map.json`.
 
-    `spectra` is "zarr" (default, writes spectra.zarr), "csv", or "nc" (netCDF4, needs the [netcdf] extra). `png` adds PNG copies of the images in `images/png/`, and
-    `copy_source` copies the original .map file into `source/`. `map.json` is written last, so a folder without one
-    is an unfinished write. `sha256` is the checksum of the source file, if the caller has it already.
+    `map.json` is written last, so a folder without one is an unfinished write.
+
+    Args:
+        m: the map to write.
+        folder: the folder to write.
+        spectra: "zarr" (default, writes spectra.zarr), "csv", or "nc" (netCDF4, opt-in, needs the [netcdf] extra).
+        png: also write PNG copies of the images in `images/png/`.
+        copy_source: copy the original .map file into `source/`.
+        overwrite: replace the unpacked files in a folder that is not empty.
+        sha256: the checksum of the source file, if the caller has it already.
 
     Raises:
         FileExistsError: if `folder` exists and is not empty and `overwrite` is False.

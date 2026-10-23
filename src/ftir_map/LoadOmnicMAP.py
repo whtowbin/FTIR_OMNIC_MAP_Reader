@@ -105,13 +105,13 @@ def Load_Omnic_Map(dir_path: str, format: str) -> xr.Dataset | xr.DataArray | di
 def Load_Omnic_Map(dir_path: str, format: str = "Xarray-Dataset") -> xr.Dataset | xr.DataArray | dict | None:
     """Load an OMNIC .map file.
 
-    Args:
-        dir_path (str): path to the .map file.
-        format (str, optional): "Xarray-Dataset" (default), "Xarray-DataArray" or "Dictionary".
-
     Grid maps: spectra on (y, x, wn), x and y in um relative to the first column and row.
     Line, point and irregular maps: spectra on (point, wn), with x and y relative to the first point and the
     absolute stage positions in x_stage and y_stage; attrs["map_kind"] says which.
+
+    Args:
+        dir_path: path to the .map file.
+        format: "Xarray-Dataset" (default), "Xarray-DataArray" or "Dictionary".
 
     Raises:
         ValueError: on an unsupported format.
