@@ -2,7 +2,7 @@
 
 `unpack_map(m, folder)` (also `m.unpack(folder)`) writes `map.json`, `spectra.zarr`, `points.csv`, `images/` and a
 `README.txt`. Nothing in the folder needs this package or OMNIC to read. `read_unpacked(folder)` rebuilds the
-`OmnicMap` from those files. The layout is specified in docs/unpacked_format.md.
+`OmnicMap` from those files. The layout is specified in docs/site/unpacked_format.md.
 
 The spectra, axis, positions, titles, times, backgrounds, images and decoded metadata round-trip exactly. The raw
 header bytes (`collection.raw`) and the block directory (`blocks`) are not kept, so `OmnicMap.block_bytes` needs the
@@ -42,6 +42,7 @@ from .omnic import (
     StageImage,
 )
 from .writers import save_images, save_points, save_spectra, write_json
+from .zarr_safety import check_zarr_store
 
 FORMAT_NAME = "ftir-map unpacked"
 FORMAT_VERSION = 1
@@ -198,7 +199,7 @@ def _readme_text(m: OmnicMap, spectra_file: str, spectra: str) -> str:
         "",
     ]
     lines += {"nc": _NC_HELP, "zarr": _ZARR_HELP, "csv": _CSV_HELP}[spectra]
-    lines += ["", "Positions are stage coordinates in um. Format details: docs/unpacked_format.md in the package."]
+    lines += ["", "Positions are stage coordinates in um. Format details: docs/site/unpacked_format.md in the package."]
     return "\n".join(lines) + "\n"
 
 
@@ -267,7 +268,7 @@ def unpack_map(
     overwrite: bool = False,
     sha256: str | None = None,
 ) -> dict[str, Any]:
-    """Write `m` as an unpacked-map folder (docs/unpacked_format.md) and return the content of its `map.json`.
+    """Write `m` as an unpacked-map folder (docs/site/unpacked_format.md) and return the content of its `map.json`.
 
     `spectra` is "zarr" (default, writes spectra.zarr), "csv", or "nc" (netCDF4, needs the [netcdf] extra). `png` adds PNG copies of the images in `images/png/`, and
     `copy_source` copies the original .map file into `source/`. `map.json` is written last, so a folder without one
@@ -375,11 +376,14 @@ def _open_spectra(folder: Path, meta: dict[str, Any]) -> xr.Dataset:
     kind, path = meta["files"]["spectra_format"], contained(folder, meta["files"]["spectra"])
     if kind == "csv":
         return _dataset_from_csv(folder, meta)
-    engine = "zarr"
     if kind == "nc":
         import_optional("h5netcdf", "netcdf", "reading spectra.nc")
-        engine = "h5netcdf"
-    with xr.open_dataset(path, engine=engine, decode_times=False, decode_timedelta=False) as dataset:
+        opened = xr.open_dataset(path, engine="h5netcdf", decode_times=False, decode_timedelta=False)
+    else:
+        check_zarr_store(path)  # a shared store must not name a pickle or other unsafe codec
+        # consolidated=False: read exactly the per-array metadata that was checked
+        opened = xr.open_dataset(path, engine="zarr", consolidated=False, decode_times=False, decode_timedelta=False)
+    with opened as dataset:
         return dataset.load()
 
 
