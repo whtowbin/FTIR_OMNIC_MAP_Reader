@@ -122,3 +122,130 @@ Returns a list of `ImageArray(index, format, array, extent)`:
 
 The orientation was verified against OMNIC's screenshots (docs/file_format.md, section 8). A map without images gives
 an empty list.
+
+# Writing files
+
+The writers below take the same `OmnicMap` and write files for other programs. Examples use `tests/data/GCB_1C_ol54_ultrafast map_75um aperture and step.map` (13 x 11 grid, 143 spectra, 6 mosaic tiles). The optional formats need an extra, and raise an `ImportError` that names it:
+
+| Extra | Needed for |
+|---|---|
+| `[zarr]` | `.zarr` spectra |
+| `[yaml]` | `.yaml` and `.yml` metadata (PyYAML) |
+| `[parquet]` | `.parquet` points (pyarrow) |
+| `[netcdf]` | `.nc` spectra (h5netcdf and h5py) |
+
+The format comes from the file extension unless `format=` is given. Each method is also a function in `ftir_map.writers`.
+
+## `save_metadata(path, format=None)`
+
+Writes the dict that is in `to_xarray().attrs` (see "attrs" above), without the raw header bytes. JSON, YAML and CSV hold the same content.
+
+- `.json`: nested, indented. Arrays are lists, datetimes are ISO strings, non-finite numbers are `null`.
+- `.yaml` or `.yml`: the same nested content in block style, written with `yaml.safe_dump`.
+- `.csv`: one `key,value` row per value, with dotted keys for nested items and `key[0]` for list items. Empty fields are `None`.
+
+```json
+{
+  "source_path": "tests/data/GCB_1C_ol54_ultrafast map_75um aperture and step.map",
+  "map_kind": "grid",
+  "grid_shape": [13, 11],
+  "collection": { "n_points": 432, "first_x": 678.8489379882812, "n_sample_scans": 1 }
+}
+```
+
+```csv
+key,value
+grid_shape[0],13
+grid_shape[1],11
+collection.n_sample_scans,1
+map_definition.x_range[0],1124.2786262686
+```
+
+## `save_points(path, format=None)`
+
+One row per spectrum in file order. Columns: `index`, `x_um`, `y_um`, `z_um` (only when the file records it), `row` and `column` (grid and array maps), `title`, `time_s`, `background_index` (only when recorded). Non-finite numbers are empty in CSV and `null` in JSON.
+
+- `.csv`:
+
+```csv
+index,x_um,y_um,row,column,title,time_s,background_index
+0,1124.2786865234375,19500.248046875,0,0,Spectrum 1 of 143,0.0,0
+1,1199.2786865234375,19500.248046875,0,1,Spectrum 2 of 143,0.1,0
+```
+
+- `.json`: a list of records, `[{"index": 0, "x_um": 1124.27, ...}, ...]`.
+- `.parquet`: the same columns; needs pyarrow (pandas is not needed).
+
+The `row` and `column` columns link a spectrum to its cell in the `(y, x)` grid of `to_xarray()`. They tie `spectra.csv` columns (named by `index`) to grid positions.
+
+## `save_spectra(path, format=None)`
+
+An existing file or Zarr store at `path` is replaced.
+
+- `.csv`: the first column is the spectral axis with its unit in the header (`wavenumber_cm-1`, or `axis_points` for interferograms), then one column per spectrum named by its point index. Values have nine significant digits, which holds a float32 exactly. Use `points.csv` to look up the position of column `n`.
+
+```csv
+wavenumber_cm-1,0,1,2,3
+678.849,0.0412345,0.0398765,...
+```
+
+- `.npz`: arrays in file order: `spectra` `(n_points, n_axis)`, `axis`, `x`, `y`, `z` (when recorded), `grid_index` `(n_points, 2)` (grid maps) and `metadata`, the JSON text of the metadata. Read it with `np.load(path)` and `json.loads(str(npz["metadata"]))`; no pickle is used.
+- `.nc`: `to_xarray()` as NetCDF4, read back with `xarray.open_dataset(path)`. NetCDF attributes cannot be nested, so the metadata is one attribute, `metadata_json`. The backend is h5netcdf: it installs from wheels with h5py and needs no system netCDF library, while netCDF4 would add a compiled library for no gain here.
+- `.zarr`: `to_zarr(path, mode="w")`.
+
+## `save_images(folder, format="png")`
+
+Writes `image_01`, `image_02`, ... for each video image or mosaic tile, each with a world file, plus an index. `format` is:
+
+| `format` | Image | World file |
+|---|---|---|
+| `"png"` | `image_01.png` | `.pgw` |
+| `"tiff"` | `image_01.tif` | `.tfw` |
+| `"original"` | `image_01.bmp` or `.jpg`, the embedded bytes unchanged | `.bpw` or `.jgw` |
+
+An image is decoded only in the format its block declares (BMP or JPEG). A map without images writes nothing and returns `[]`; otherwise the function returns the index records.
+
+The world file has six lines, in stage um: pixel size in x, 0, 0, minus the pixel size in y, and x and y of the upper-left pixel centre (half a pixel inside the corner `xmin`, `ymax`). The images are upright (docs/file_format.md, section 8), so this places them in ImageJ, QGIS and similar programs. The stage coordinate system has no projection. Images with no stage rectangle get no world file.
+
+```
+0.580865673161
+0
+0
+-0.588921282799
+989.569058325
+19747.9535862
+```
+
+`images.json` (a list of records) and `images.csv` index the images:
+
+```csv
+file,index,source_format,width,height,xmin,xmax,ymin,ymax,pixel_size_x_um,pixel_size_y_um,world_file,orientation_verified
+image_01.png,1,JPEG,878,686,989.27,1499.27,19344.25,19748.25,0.5809,0.5889,image_01.pgw,True
+```
+
+`orientation_verified` is `True` for every image, since the orientation was checked against OMNIC's screenshots.
+
+## `export_all(folder, spectra="zarr", metadata="json", points="csv", images="png", overwrite=False)`
+
+Writes one self-describing folder and returns its path:
+
+```
+out/
+  README.txt        names and describes each file
+  spectra.zarr      or spectra.nc, .npz, .csv
+  points.csv        or points.parquet, .json
+  metadata.json     or metadata.yaml, .csv
+  images/           image_01.png, image_01.pgw, ..., images.json, images.csv (left out if the map has no images)
+```
+
+`images="none"` leaves the folder out. All formats are checked before anything is written. It raises `FileExistsError` if `folder` exists and is not empty, unless `overwrite=True`; files already in the folder that it does not write are kept.
+
+## Command line
+
+```console
+ftir-map info FILE
+ftir-map export FILE --out DIR [--spectra zarr|nc|npz|csv] [--metadata json|yaml|csv]
+                [--points csv|parquet|json] [--images png|tiff|original|none] [--overwrite]
+```
+
+`info` prints the map kind, number of points, axis range, data kind, number of images and key collection parameters. `export` calls `export_all`. Errors print one line to stderr and exit with status 1.

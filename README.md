@@ -9,6 +9,7 @@ mosaic images with their stage coordinates, and the collection metadata that cou
 ```console
 pip install ftir-OMNIC-map-reader
 pip install "ftir-OMNIC-map-reader[zarr]"   # only if you want to write Zarr stores
+pip install "ftir-OMNIC-map-reader[yaml,parquet,netcdf]"   # optional: YAML metadata, Parquet points, netCDF spectra
 ```
 
 With [uv](https://docs.astral.sh/uv/): `uv add ftir-OMNIC-map-reader`. Python 3.10 or newer.
@@ -50,6 +51,23 @@ spectra, axes, positions, metadata = m.to_numpy()  # arrays and plain dicts
 everything = m.to_dict()  # spectra, axes, positions, titles, times, backgrounds, images
 m.to_zarr("my_map.zarr")  # needs the zarr extra; refuses to overwrite by default
 images = m.to_images()  # video images or mosaic tiles with stage extents
+```
+
+### Writing files
+
+```python
+m.save_metadata("meta.json")  # or .yaml, .csv
+m.save_points("points.csv")  # one row per spectrum: x, y, z, row, column, title, time, background
+m.save_spectra("spectra.npz")  # or .csv, .nc, .zarr
+m.save_images("images/", format="png")  # PNG or TIFF or the original files, plus world files and an index
+m.export_all("my_map_export/")  # all of the above in one folder with a README.txt
+```
+
+The same from the command line:
+
+```console
+ftir-map info my_map.map
+ftir-map export my_map.map --out my_map_export --spectra nc --metadata yaml --images tiff
 ```
 
 Showing a video image with the map positions:

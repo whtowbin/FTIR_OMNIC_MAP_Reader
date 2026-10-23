@@ -11,7 +11,13 @@
 - `OmnicMap` holds the spectra, spectral axis, stage X, Y and Z, map kind, spectrum titles and times, backgrounds,
   video images and mosaic tiles with their stage extents, the collection parameters and the map definition.
 - Exports: `to_xarray()`, `to_numpy()`, `to_dict()`, `to_zarr(path)` and `to_images()`. See docs/exports.md.
-- Optional extra for Zarr: `pip install "ftir-OMNIC-map-reader[zarr]"`.
+- File writers: `save_metadata()` (JSON, YAML or flattened CSV), `save_points()` (CSV, JSON or Parquet),
+  `save_spectra()` (CSV, NPZ, netCDF or Zarr), `save_images()` (PNG, TIFF or the original BMP and JPEG files, each with
+  a world file and an `images.json` / `images.csv` index) and `export_all()` (one self-describing folder with a
+  README.txt). See docs/exports.md.
+- The `ftir-map` command: `ftir-map info FILE` and `ftir-map export FILE --out DIR`.
+- Optional extras: `[zarr]`, `[yaml]` (PyYAML), `[parquet]` (pyarrow) and `[netcdf]` (h5netcdf and h5py), for example
+  `pip install "ftir-OMNIC-map-reader[zarr]"`.
 - docs/file_format.md describes the file format, and says which fields are verified.
 - Image orientation was checked against OMNIC's screenshots: the images are upright and need no flip.
 - Tests, including OMNIC's own CSV exports as ground truth, and GitHub Actions workflows for testing and publishing.
