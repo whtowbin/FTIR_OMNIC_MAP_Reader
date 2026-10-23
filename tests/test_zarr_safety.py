@@ -92,3 +92,13 @@ def test_read_unpacked_refuses_a_store_tampered_to_use_pickle(tmp_path):
         (spectra / "zarr.json").write_text(json.dumps(meta))
     with pytest.raises(UnsafeZarrStore):
         read_unpacked(folder)
+
+
+@pytest.mark.parametrize("name", [".ZARRAY", ".Zarray", "ZARR.JSON", "Zarr.json"])
+def test_metadata_names_spelled_in_another_case_are_refused(tmp_path, name):
+    store = tmp_path / "store.zarr"
+    (store / "arr").mkdir(parents=True)
+    meta = {"zarr_format": 2, "dtype": "|O", "compressor": None, "filters": [{"id": "pickle"}]}
+    (store / "arr" / name).write_text(json.dumps(meta))  # on macOS zarr would read this as .zarray / zarr.json
+    with pytest.raises(UnsafeZarrStore, match="not spelled"):
+        check_zarr_store(store)

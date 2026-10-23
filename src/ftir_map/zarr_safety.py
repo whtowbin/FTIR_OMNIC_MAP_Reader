@@ -11,6 +11,7 @@ the metadata that is used.
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ V3_DATA_TYPES = frozenset(
 )
 V3_NAMED_DATA_TYPES = frozenset({"fixed_length_utf32", "fixed_length_ascii"})
 SAFE_NUMPY_KINDS = frozenset("biufUS")  # bool, int, uint, float, fixed-width unicode, fixed-width bytes
+METADATA_NAMES = frozenset({".zarray", ".zgroup", ".zattrs", ".zmetadata", "zarr.json"})
 
 
 class UnsafeZarrStore(ValueError):
@@ -41,12 +43,28 @@ def check_zarr_store(path: str | Path) -> None:
     for item in root.rglob("*"):
         if item.is_symlink():
             raise UnsafeZarrStore(f"{item} is a symbolic link inside the Zarr store")
-        if item.name == ".zarray":
+        name = _metadata_name(item)
+        if name == ".zarray":
             _check_v2_array(item, _read_json(item))
-        elif item.name == "zarr.json":
+        elif name == "zarr.json":
             meta = _read_json(item)
             if meta.get("node_type") == "array":
                 _check_v3_array(item, meta)
+
+
+def _metadata_name(item: Path) -> str | None:
+    """The Zarr metadata name `item` stands for, or None.
+
+    macOS (APFS) and Windows file systems ignore case, so zarr asking for ".zarray" can read ".ZARRAY". Names are
+    compared after case and Unicode folding, and a metadata file not spelled exactly is refused, so what zarr can
+    read is always what was checked.
+    """
+    folded = unicodedata.normalize("NFC", item.name).casefold()
+    if folded not in METADATA_NAMES:
+        return None
+    if item.name != folded:
+        raise UnsafeZarrStore(f"{item}: Zarr metadata file name is not spelled {folded!r}")
+    return folded
 
 
 def _read_json(path: Path) -> dict[str, Any]:
