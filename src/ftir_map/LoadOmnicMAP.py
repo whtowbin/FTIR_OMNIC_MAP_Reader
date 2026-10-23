@@ -1,97 +1,136 @@
-#%%
+"""`Load_Omnic_Map`: the package's original entry point, now built on `ftir_map.omnic.read_omnic`.
+
+Grid maps (including array-detector maps whose pixels fill a grid) come back as before: spectra on (y, x, wn)
+with x and y relative to the first column and row, and the PyMca-style metadata in attrs. Line scans,
+point-to-point maps and irregular maps, which used to fail, come back per point on (point, wn).
+"""
+
+from typing import Literal, overload
+
 import numpy
 import xarray as xr
-# try:
-#     from .PyMca_Array_OmnicMap import OmnicArrayMap
-#     from .PyMca_OmnicMap import OmnicMap
-# except ImportError:
-#     from PyMca_Array_OmnicMap import OmnicArrayMap
-#     from PyMca_OmnicMap import OmnicMap
 
-try:
-    from . import PyMca_Array_OmnicMap
-    from . import PyMca_OmnicMap
-except ImportError:
-    import PyMca_Array_OmnicMap 
-    import PyMca_OmnicMap
+from .omnic import OmnicMap, read_omnic
 
-#%%
-def Load_Omnic_Map(dir_path: str, format: str = "Xarray-Dataset") -> xr.Dataset:
-    """_summary_
+FORMATS = ("Xarray-Dataset", "Xarray-DataArray", "Dictionary")
+UNIT_NAMES = {"x": "um", "y": "um", "wn": "cm^-1", "data": "absorbance"}
+UNIT_LONG_NAMES = {"x": "microns", "y": "microns", "wn": "wavenumbers", "data": "absorbance"}
+
+
+def _omnic_info(m: OmnicMap) -> dict:
+    """The keys of PyMca's OmnicMap.info["OmnicInfo"]."""
+    c = m.collection
+    info = {
+        "Number of points": c.n_points,
+        "Number of scan points": c.n_scan_points,
+        "Interferogram peak position": c.interferogram_peak_position,
+        "Number of sample scans": c.n_sample_scans,
+        "Number of FFT points": c.n_fft_points,
+        "Number of background scans": c.n_background_scans,
+        "First X value": c.first_x,
+        "Last X value": c.last_x,
+        "Identifier for start indices of spectra": c.spectrum_set_identifier,
+        "Laser frequency": c.laser_frequency,
+        "Data spacing": c.data_spacing,
+        "Background gain": c.background_gain,
+    }
+    d = m.map_description
+    if d is not None:
+        (x0, y0), (x1, y1) = d.first_location, d.last_location
+        info["First map location"] = [x0, y0]
+        info["Last map location"] = [x1, y1]
+        info["Mapping stage X step size"] = d.x_step
+        info["Mapping stage Y step size"] = d.y_step
+        info["Number of spectra"] = abs((1 + ((y1 - y0) / d.y_step)) * (1 + ((x1 - x0) / d.x_step)))
+    return info
+
+
+def _legacy_info(m: OmnicMap, n_rows: int, n_columns: int) -> dict:
+    """The rest of PyMca's OmnicMap.info for a grid map of n_rows x n_columns."""
+    info = {"Dim_1": n_rows, "Dim_2": n_columns, "Dim_3": m.spectra.shape[1], "SourceName": [str(m.path)]}
+    info.update(Size=n_rows, NumberOfFiles=n_rows, FileIndex=0, Channel0=0.0)
+    info["McaCalib"] = [m.collection.first_x * 1.0, m.collection.data_spacing * 1.0, 0.0]
+    info["OmnicInfo"] = _omnic_info(m)
+    dx = (m.x[-1] - m.x[0]) / (n_columns - 1)
+    dy = (m.y[-1] - m.y[0]) / (n_rows - 1)
+    if dx > 0.0 and dy > 0.0:
+        info["xScale"] = [m.x[0], dx]
+        info["yScale"] = [m.y[0], dy]
+    info["positioners"] = {"X": m.x.copy(), "Y": m.y.copy()}
+    return info
+
+
+def _axis_values(v: numpy.ndarray, index: numpy.ndarray, n: int) -> numpy.ndarray:
+    """Mean stored position of each grid column (or row)."""
+    return numpy.array([v[index == k].mean() for k in range(n)])
+
+
+def _grid_dataset(m: OmnicMap) -> xr.Dataset:
+    if m.grid_shape is None or m.grid_index is None:
+        raise ValueError(f"{m.path.name}: a {m.map_kind} map has no regular grid")
+    (n_rows, n_columns), (row, col) = m.grid_shape, m.grid_index
+    spectra = numpy.where(numpy.isfinite(m.spectra), m.spectra, 0.0).astype(numpy.float32)  # as PyMca did
+    cube = numpy.zeros((n_rows, n_columns, spectra.shape[1]), dtype=numpy.float32)
+    cube[row, col] = spectra
+    xs, ys = _axis_values(m.x, col, n_columns), _axis_values(m.y, row, n_rows)
+    metadata = {"unit_names": UNIT_NAMES, "unit_long_names": UNIT_LONG_NAMES, **_legacy_info(m, n_rows, n_columns)}
+    coords = {"x": xs - xs[0], "y": ys - ys[0], "wn": m.wavenumber}
+    return xr.Dataset(data_vars={"spectra": (["y", "x", "wn"], cube)}, coords=coords, attrs=metadata)
+
+
+def _point_dataset(m: OmnicMap) -> xr.Dataset:
+    coords = {
+        "point": numpy.arange(m.n_points),
+        "wn": m.wavenumber,
+        "x": ("point", m.x - m.x[0]),
+        "y": ("point", m.y - m.y[0]),
+        "x_stage": ("point", m.x),
+        "y_stage": ("point", m.y),
+    }
+    metadata = {"unit_names": UNIT_NAMES, "unit_long_names": UNIT_LONG_NAMES, "map_kind": m.map_kind}
+    metadata.update(data_kind=m.data_kind, OmnicInfo=_omnic_info(m), SourceName=[str(m.path)])
+    return xr.Dataset(data_vars={"spectra": (["point", "wn"], m.spectra)}, coords=coords, attrs=metadata)
+
+
+@overload
+def Load_Omnic_Map(dir_path: str, format: Literal["Xarray-Dataset"] = ...) -> xr.Dataset: ...
+@overload
+def Load_Omnic_Map(dir_path: str, format: Literal["Xarray-DataArray"]) -> xr.DataArray: ...
+@overload
+def Load_Omnic_Map(dir_path: str, format: Literal["Dictionary"]) -> dict: ...
+@overload
+def Load_Omnic_Map(dir_path: str, format: str) -> xr.Dataset | xr.DataArray | dict: ...
+
+
+def Load_Omnic_Map(dir_path: str, format: str = "Xarray-Dataset") -> xr.Dataset | xr.DataArray | dict:
+    """Load an OMNIC .map file.
 
     Args:
-        dir_path (str): _description_
-        format (str, optional): _description_. Defaults to "Xarray-Dataset". Other Options are "Xarray-DataArray" and "Dictionary".
+        dir_path (str): path to the .map file.
+        format (str, optional): "Xarray-Dataset" (default), "Xarray-DataArray" or "Dictionary".
+
+    Grid maps: spectra on (y, x, wn), x and y in um relative to the first column and row.
+    Line, point and irregular maps: spectra on (point, wn), with x and y relative to the first point and the
+    absolute stage positions in x_stage and y_stage; attrs["map_kind"] says which.
 
     Raises:
-        ValueError: Errors if the format is not supported.
+        ValueError: on an unsupported format, or a file that is not an OMNIC map or holds no spectra
+            (ftir_map.omnic.OmnicFormatError is a ValueError).
 
     Returns:
-        xr.Dataset: Dataset containing the spectral data, coordinates, and metadata.
-        xr.DataArray: DataArray containing the spectral data.
-        dict: Dictionary containing the spectral data, coordinates, and metadata.
+        xr.Dataset, xr.DataArray or dict with keys data, x, y, wn and metadata (plus x_stage and y_stage for
+        per-point maps).
     """
-    try:
-        mapfile = PyMca_OmnicMap.OmnicMap(dir_path)
-    except Exception as e:
-        print(f"Error loading map file: {e}")
-        print("Trying to load as OmnicArrayMap...")
-        try:
-            mapfile = PyMca_Array_OmnicMap.OmnicArrayMap(dir_path)
-            print("Loaded as OmnicArrayMap.")
-        except Exception as e:
-            print(f"Error loading map file as OmnicArrayMap: {e}")
-            print("Unable to load the file.")
-            return None
-    
-    wn0 = mapfile.info["OmnicInfo"]['First X value'] # cm^-1
-    wn1 = mapfile.info["OmnicInfo"]['Last X value'] # cm^-1
-
-    unique_x = numpy.unique(mapfile.info["positioners"]["X"])
-    unique_y = numpy.unique(mapfile.info["positioners"]["Y"])
-
-    x_coords = unique_x - unique_x[0] #µm
-    y_coords = unique_y - unique_y[0] #µm
-
-    len_wn = mapfile.data.shape[2]
-    wn  = numpy.linspace(wn0, wn1, len_wn) #cm^-1
-
-    unit_names = {"x": "um", "y": "um", "wn": "cm^-1", "data": "absorbance"}
-    unit_long_names = {"x": "microns", "y": "microns", "wn": "wavenumbers", "data": "absorbance"}
-    metadata = {"unit_names": unit_names, "unit_long_names": unit_long_names, **mapfile.info}
-
-    # Reshape the data to match the unique x and y coordinates
-    # This assumes that the data is structured in a way that corresponds to the unique x and y coordinates.
-    lenX = len(unique_x)
-    lenY = len(unique_y)
-    reshaped = mapfile.data.reshape(lenY, lenX, len_wn)
-    data = {"spectra": (["y", "x", "wn"], reshaped)}
-
-
-    coords = {
-        "x": x_coords,
-        "y": y_coords,
-        "wn": wn,
-    }
-
-    dataset = xr.Dataset(
-        data_vars= data,
-        coords= coords,
-        attrs= metadata
-    )
+    if format not in FORMATS:
+        raise ValueError(f"Unsupported format: {format}. Supported formats are {', '.join(map(repr, FORMATS))}.")
+    m = read_omnic(dir_path)
+    dataset = _grid_dataset(m) if m.grid_shape is not None else _point_dataset(m)
     if format == "Xarray-Dataset":
         return dataset
-    elif format == "Xarray-DataArray":
+    if format == "Xarray-DataArray":
         return dataset["spectra"]
-    elif format == "Dictionary":
-        return {
-            "data": dataset["spectra"].values,
-            "x": dataset["x"].values,
-            "y": dataset["y"].values,
-            "wn": dataset["wn"].values,
-            "metadata": metadata
-        }
-    else:
-        raise ValueError(f"Unsupported format: {format}. Supported formats are 'Xarray-Dataset', 'Xarray-DataArray', and 'Dictionary'.")
-
-# %%
+    out = {"data": dataset["spectra"].values, "x": dataset["x"].values, "y": dataset["y"].values}
+    if m.grid_shape is None:
+        out.update(x_stage=m.x, y_stage=m.y)
+    out.update(wn=dataset["wn"].values, metadata=dataset.attrs)
+    return out

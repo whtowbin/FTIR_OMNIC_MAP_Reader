@@ -27,3 +27,33 @@ Source = "https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ftir_map"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+    "ty>=0.0.91",
+]
+
+[tool.ruff]
+line-length = 120
+# PyMca-derived readers and scripts kept unchanged for now; new code does not depend on them.
+extend-exclude = [
+    "src/ftir_map/PyMca_OmnicMap.py",
+    "src/ftir_map/PyMca_Array_OmnicMap.py",
+    "src/ftir_map/LoadOmnicArrayMAP.py",
+    "src/ftir_map/testpoint.py",
+]
+
+[tool.ruff.lint]
+extend-select = ["I", "B", "UP", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# public names kept for backward compatibility
+"src/ftir_map/LoadOmnicMAP.py" = ["N999", "N802"]
