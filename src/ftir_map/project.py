@@ -19,7 +19,7 @@ import numpy as np
 
 from .exports import reader_version
 from .omnic import OmnicFormatError, OmnicMap, read_omnic
-from .unpacked import MAP_JSON, read_unpacked, sha256_file, unpack_map
+from .unpacked import MAP_JSON, contained, read_unpacked, sha256_file, unpack_map
 from .writers import write_csv, write_json
 
 PROJECT_FORMAT = "ftir-map project"
@@ -79,6 +79,14 @@ def safe_name(path: Path) -> str:
     """File stem with every character outside letters, digits, dot, dash and underscore replaced by `_`."""
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem).strip("._-")[:NAME_LENGTH]
     return name or "map"
+
+
+_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def valid_name(name: object) -> bool:
+    """True for a map-folder name `safe_name` could have produced; catalog names are untrusted when re-read."""
+    return isinstance(name, str) and bool(_NAME.fullmatch(name)) and name not in {".", ".."}
 
 
 def unique_name(path: Path, sha256: str, taken: set[str]) -> str:
@@ -148,7 +156,8 @@ def _is_current(existing: Row | None, sha256: str, project_dir: Path) -> bool:
         existing
         and existing["sha256"] == sha256
         and existing["status"] == OK
-        and (project_dir / existing["folder"] / MAP_JSON).is_file()
+        and valid_name(existing["name"])
+        and (contained(project_dir, existing["folder"]) / MAP_JSON).is_file()
     )
 
 
@@ -162,13 +171,14 @@ def _unpack_one(
     sha256 = sha256_file(path)
     if existing and not overwrite and _is_current(existing, sha256, project_dir):
         return existing, "unchanged"
-    name = existing["name"] if existing else unique_name(path, sha256, taken)
+    keep = existing is not None and valid_name(existing["name"])  # a stored name is reused only if it is safe
+    name = existing["name"] if keep else unique_name(path, sha256, taken)
     try:
         m = read_omnic(path)
     except UNREADABLE as error:
         reason = str(error).removeprefix(f"{path.name}: ")
         return skipped_row(name, path, sha256, reason), "skipped"
-    unpack_map(m, project_dir / MAPS_DIR / name, overwrite=True, sha256=sha256, **options)
+    unpack_map(m, contained(project_dir / MAPS_DIR, name), overwrite=True, sha256=sha256, **options)
     return catalog_row(name, m, sha256), "unpacked"
 
 
@@ -267,7 +277,7 @@ class Project:
         """The unpacked-map folder of `name`; KeyError if there is no such map, with the names that exist."""
         for row in self.rows:
             if row["name"] == name and row["status"] == OK:
-                return self.path / row["folder"]
+                return contained(self.path, row["folder"])
         raise KeyError(f"{name!r} is not an unpacked map in {self.path}; names: {self.names}")
 
     def load(self, name: str) -> OmnicMap:

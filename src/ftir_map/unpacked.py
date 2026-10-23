@@ -220,6 +220,19 @@ _CSV_HELP = [
 ]
 
 
+def contained(base: str | Path, relative: str | Path) -> Path:
+    """`base / relative`, refusing any path that leaves `base`.
+
+    Unpacked folders and projects are meant to be shared, so file names read from map.json or catalog.json are
+    untrusted: a name such as "../../x" must not make the reader open, or the writer clear, anything outside.
+    """
+    root = Path(base).resolve()
+    target = (root / relative).resolve()
+    if not target.is_relative_to(root):
+        raise ValueError(f"{str(relative)!r} points outside {base}")
+    return target
+
+
 def _clear_previous(folder: Path) -> None:
     for name in OWN_NAMES:
         target = folder / name
@@ -332,8 +345,8 @@ def _points_from_csv(path: Path) -> dict[str, Any]:
 def _dataset_from_csv(folder: Path, meta: dict[str, Any]) -> xr.Dataset:
     """The `point_dataset` variables, rebuilt from spectra.csv, backgrounds.csv and points.csv."""
     dim = axis_dimension(meta["metadata"]["axis_unit"])
-    table = np.loadtxt(folder / meta["files"]["spectra"], delimiter=",", skiprows=1, ndmin=2)
-    points = _points_from_csv(folder / meta["files"]["points"])
+    table = np.loadtxt(contained(folder, meta["files"]["spectra"]), delimiter=",", skiprows=1, ndmin=2)
+    points = _points_from_csv(contained(folder, meta["files"]["points"]))
     variables: dict[str, Any] = {"spectra": (("point", dim), table[:, 1:].T.astype(np.float32))}
     variables.update({name: ("point", values) for name, values in points.items()})
     if (folder / BACKGROUNDS_CSV).exists():
@@ -344,7 +357,7 @@ def _dataset_from_csv(folder: Path, meta: dict[str, Any]) -> xr.Dataset:
 
 def _open_spectra(folder: Path, meta: dict[str, Any]) -> xr.Dataset:
     """The spectra file as a dataset held in memory; times are left as plain numbers."""
-    kind, path = meta["files"]["spectra_format"], folder / meta["files"]["spectra"]
+    kind, path = meta["files"]["spectra_format"], contained(folder, meta["files"]["spectra"])
     if kind == "csv":
         return _dataset_from_csv(folder, meta)
     engine = "h5netcdf" if kind == "nc" else "zarr"
@@ -394,7 +407,7 @@ def _images(folder: Path, files: dict[str, Any], records: list[dict[str, Any]]) 
     out = []
     for record in records:
         extent = record["extent"]
-        data = (folder / files["images"] / record["file"]).read_bytes()
+        data = contained(folder, Path(files["images"]) / record["file"]).read_bytes()
         out.append(
             StageImage(
                 record["index"],

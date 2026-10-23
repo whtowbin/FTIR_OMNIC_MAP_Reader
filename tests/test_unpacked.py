@@ -401,3 +401,43 @@ def test_library_sweep_project(tmp_path):
         else:
             assert "no spectra" in row["status"]
     assert all(row["n_points"] == project.load(row["name"]).n_points for row in project.rows if row["status"] == "ok")
+
+
+# ------------------------------------------------------------------ untrusted names in map.json and catalog.json
+def test_contained_refuses_paths_outside_the_base(tmp_path):
+    from ftir_map.unpacked import contained
+
+    assert contained(tmp_path, "images/image_01.bmp") == (tmp_path / "images/image_01.bmp").resolve()
+    for bad in ("../outside.nc", "images/../../outside.nc", str(tmp_path.parent / "abs.nc")):
+        with pytest.raises(ValueError, match="points outside"):
+            contained(tmp_path, bad)
+
+
+def test_read_unpacked_refuses_a_tampered_map_json(tmp_path):
+    folder = tmp_path / "unpacked"
+    grid_map(tmp_path).unpack(folder)
+    (tmp_path / "secret.nc").write_bytes(b"not yours")
+    meta_path = folder / "map.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["files"]["spectra"] = "../secret.nc"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    with pytest.raises(ValueError, match="points outside"):
+        read_unpacked(folder)
+
+
+def test_project_rerun_never_touches_a_folder_named_by_a_tampered_catalog(library, tmp_path):
+    project_dir = tmp_path / "project"
+    unpack([library], project_dir)
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "map.json").write_text("{}")  # would be cleared by an overwrite if the name were trusted
+    catalog_path = project_dir / "catalog.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    row = next(r for r in catalog["maps"] if r["name"] == "my_map")
+    row["name"], row["folder"] = "../../victim", "../victim"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    with pytest.raises(ValueError, match="points outside"):
+        open_project(project_dir).load("../../victim")
+    unpack([library], project_dir, overwrite=True)
+    assert (victim / "map.json").read_text() == "{}"
+    assert all(".." not in r["name"] for r in open_project(project_dir).rows)
