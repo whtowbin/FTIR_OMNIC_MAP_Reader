@@ -227,3 +227,10 @@ def test_library_sweep(path):
     json.dumps(dataset.attrs)
     np.testing.assert_array_equal(dataset["spectra"].values, spectra)
     assert len(m.to_images()) == len(m.images)
+
+
+def test_package_exposes_its_version():
+    import ftir_map
+    from ftir_map.__about__ import __version__
+
+    assert ftir_map.__version__ == __version__

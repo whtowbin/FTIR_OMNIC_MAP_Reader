@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
+from .__about__ import __version__
 from .exports import ImageArray
 from .omnic import OmnicFormatError, OmnicMap, read_omnic
 from .project import Project, load, open_project, unpack
@@ -12,6 +13,7 @@ __all__ = [
     "OmnicFormatError",
     "OmnicMap",
     "Project",
+    "__version__",
     "load",
     "open_project",
     "read_omnic",

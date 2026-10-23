@@ -1,19 +1,26 @@
 # FTIR OMNIC Map Reader
 
-Read Thermo OMNIC `.map` files (FTIR maps, line scans and point lists) into Python as NumPy arrays or xarray datasets.
-It returns the spectra, the spectral axis, the stage position of every spectrum, the background spectra, the video or
-mosaic images with their stage coordinates, and the collection metadata that could be decoded.
+[![PyPI](https://img.shields.io/pypi/v/ftir-OMNIC-map-reader)](https://pypi.org/project/ftir-OMNIC-map-reader/)
+[![Documentation](https://img.shields.io/badge/docs-readthedocs-blue)](https://ftir-omnic-map-reader.readthedocs.io/)
+[![Tests](https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader/actions/workflows/tests.yml/badge.svg)](https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader/actions/workflows/tests.yml)
 
-Documentation: <https://ftir-omnic-map-reader.readthedocs.io/>
+Read Thermo OMNIC `.map` files (FTIR area maps, line scans, point-to-point maps and array-detector maps) into Python,
+without OMNIC. You get the spectra, the spectral axis, the stage position of every spectrum, the background spectra,
+the video or mosaic images with their stage coordinates, and the collection metadata. Export them to open formats, or
+unpack whole folders of `.map` files into a documented project folder that anyone can read.
+
+**Full documentation: <https://ftir-omnic-map-reader.readthedocs.io/>**. This README is a short overview; the
+documentation has every option, the output formats, worked examples and the Python API reference.
 
 ## Install
 
 ```console
 pip install ftir-OMNIC-map-reader
-pip install "ftir-OMNIC-map-reader[yaml,parquet,netcdf]"   # optional: YAML metadata, Parquet points, netCDF export
 ```
 
-With [uv](https://docs.astral.sh/uv/): `uv add ftir-OMNIC-map-reader`. Python 3.10 or newer.
+With [uv](https://docs.astral.sh/uv/): `uv add ftir-OMNIC-map-reader`. Python 3.10 or newer. Optional extras add YAML
+metadata, Parquet tables and netCDF export; see
+[Installation](https://ftir-omnic-map-reader.readthedocs.io/en/latest/installation/).
 
 ## Quick start
 
@@ -22,117 +29,46 @@ from ftir_map import read_omnic
 
 m = read_omnic("my_map.map")
 m.map_kind  # "grid", "line", "points" or "array"
-m.spectra.shape  # (n_points, n_axis), in file order; NaN is kept as stored
-m.axis  # wavenumbers in cm-1 (m.axis_unit == "cm-1")
+m.spectra.shape  # (n_points, n_axis), in file order
+m.axis  # wavenumbers in cm-1
 m.x, m.y  # stage position of each spectrum in um
 ds = m.to_xarray()  # spectra on (y, x, wavenumber) for a grid, (point, wavenumber) otherwise
+m.export_all("my_map_export/")  # spectra, metadata, points table and images in one folder
 ```
 
-`read_omnic` raises `OmnicFormatError` (a `ValueError`) for a file that is not an OMNIC map or holds no spectra.
+More in the [Quick start](https://ftir-omnic-map-reader.readthedocs.io/en/latest/quickstart/) and
+[Map kinds](https://ftir-omnic-map-reader.readthedocs.io/en/latest/map_kinds/).
 
-## Map kinds
-
-| `map_kind` | What it is | xarray layout of `spectra` |
-|---|---|---|
-| `grid` | rectangular area map | (y, x, wavenumber) |
-| `array` | array-detector map; its pixels fill a grid | (y, x, wavenumber) |
-| `line` | profile along a line | (point, wavenumber) |
-| `points` | point-to-point map or irregular positions | (point, wavenumber) |
-
-Interferogram maps (`m.data_kind == "interferogram"`) have `axis_unit == "points"`, and the last dimension is named
-`axis`. `m.wavenumber` is the same as `m.axis` for spectra and raises an error for interferograms.
-
-## Exports
-
-Each export is described, with example output, in [docs/site/exports.md](docs/site/exports.md).
-
-```python
-ds = m.to_xarray()  # xarray.Dataset, attrs hold the metadata
-spectra, axes, positions, metadata = m.to_numpy()  # arrays and plain dicts
-everything = m.to_dict()  # spectra, axes, positions, titles, times, backgrounds, images
-m.to_zarr("my_map.zarr")  # refuses to overwrite by default
-images = m.to_images()  # video images or mosaic tiles with stage extents
-```
-
-### Writing files
-
-```python
-m.save_metadata("meta.json")  # or .yaml, .csv
-m.save_points("points.csv")  # one row per spectrum: x, y, z, row, column, title, time, background
-m.save_spectra("spectra.npz")  # or .csv, .zarr; .nc is opt-in ([netcdf] extra)
-m.save_images("images/", format="png")  # PNG or TIFF or the original files, plus world files and an index
-m.export_all("my_map_export/")  # all of the above in one folder with a README.txt
-```
-
-The same from the command line:
+## Command line
 
 ```console
-ftir-map info my_map.map
-ftir-map export my_map.map --out my_map_export --spectra npz --metadata yaml --images tiff
+ftir-map info my_map.map                         # what is in the file
+ftir-map export my_map.map --out my_map_export   # spectra (Zarr), metadata, points, images
+ftir-map unpack "Bristol 2017/" --out my_project # many maps into an open project folder
+ftir-map catalog my_project                      # list the maps in a project
 ```
 
-Showing a video image with the map positions:
+See [Command line](https://ftir-omnic-map-reader.readthedocs.io/en/latest/cli/) for every option.
 
-```python
-import matplotlib.pyplot as plt
+## What else is in the documentation
 
-for image in m.to_images():
-    plt.imshow(image.array, extent=image.extent)  # extent = (xmin, xmax, ymin, ymax) in um; no flip needed
-plt.plot(m.x, m.y, "r.")
-```
-
-## Unpack maps into an open project folder
-
-`ftir-map unpack` turns proprietary `.map` files into a folder of open files: spectra in Zarr (`spectra.zarr`, readable with
-`xarray.open_zarr` or `zarr.open` in Python, and with the Zarr packages of R and Julia; use `--spectra csv` for MATLAB
-or Excel), `points.csv`, `map.json` with all metadata, and the embedded images with
-world files. Give it files and/or folders; it finds `.map` files recursively, lists unreadable ones in the catalog, and
-skips maps that are already unpacked. The format is in [docs/site/unpacked_format.md](docs/site/unpacked_format.md).
-
-```console
-ftir-map unpack "Bristol 2017/" other_map.map --out my_project [--spectra zarr|csv|nc] [--png] [--copy-source]
-# --spectra nc is an opt-in export and needs the [netcdf] extra
-ftir-map catalog my_project
-```
-
-```python
-import ftir_map
-
-project = ftir_map.unpack(["Bristol 2017/"], "my_project")  # or ftir_map.open_project("my_project")
-project.catalog  # pandas DataFrame, one row per source file
-m = project.load(project.names[0])  # an OmnicMap, rebuilt from the open files
-ds = project.to_xarray(project.names[0])
-ftir_map.load("my_project/maps/my_map")  # also reads one unpacked map, a project, or a .map file
-```
-
-## Metadata
-
-`m.collection` (number of points, first and last X, scans, laser frequency, mirror velocity and more),
-`m.map_definition` (kind, ranges, step, title, original file name), `m.title`, `m.file_time`, `m.history`, the
-per-spectrum `m.titles`, `m.times_s` and `m.background_index`, and `m.backgrounds` (spectrum, title and time of each
-background). `m.block_bytes(key)` returns the raw bytes of any block this reader does not decode. The same metadata,
-as JSON-serializable values, is in `ds.attrs` and in the last item of `to_numpy()`. Which fields are verified against
-OMNIC's own exports, and which are inferred, is in [docs/site/file_format.md](docs/site/file_format.md).
-
-## Older interface
-
-`Load_Omnic_Map` from version 1.0 still works and returns the same output for grid maps. It also reads line scans and
-point maps now. A file it cannot read gives a warning and `None`.
-
-```python
-from ftir_map.LoadOmnicMAP import Load_Omnic_Map
-
-ds = Load_Omnic_Map("my_map.map")  # xarray.Dataset on (y, x, wn)
-d = Load_Omnic_Map("my_map.map", format="Dictionary")  # keys data, x, y, wn, metadata
-```
-
-It replaces NaN by 0, as PyMca did; `read_omnic` does not. The PyMca-derived modules `PyMca_OmnicMap`,
-`PyMca_Array_OmnicMap` and `LoadOmnicArrayMAP` are deprecated and will be removed in 2.0.
+- [Metadata and images](https://ftir-omnic-map-reader.readthedocs.io/en/latest/metadata/): collection parameters,
+  map definition, backgrounds, and how to overlay spectra on the stage images.
+- [Exports](https://ftir-omnic-map-reader.readthedocs.io/en/latest/exports/): xarray, NumPy with dictionaries, Zarr,
+  CSV, JSON and YAML metadata, points tables, and images with world files.
+- [Unpacked projects](https://ftir-omnic-map-reader.readthedocs.io/en/latest/unpacked/) and the
+  [format specification](https://ftir-omnic-map-reader.readthedocs.io/en/latest/unpacked_format/): turn proprietary
+  `.map` files into open files and load them back with this package.
+- [File format notes](https://ftir-omnic-map-reader.readthedocs.io/en/latest/file_format/): how `.map` files are laid
+  out, and which fields are verified.
+- [Migrating from 1.0](https://ftir-omnic-map-reader.readthedocs.io/en/latest/migrating/): `Load_Omnic_Map` still
+  works; the PyMca-derived modules are deprecated.
+- [Python API](https://ftir-omnic-map-reader.readthedocs.io/en/latest/api/).
 
 ## Credits and license
 
 The format knowledge behind the first versions comes from the OMNIC reader in
-[PyMca](https://github.com/vasole/pymca) (V.A. Sole, European Synchrotron Radiation Facility, MIT license). See
-[NOTICE](NOTICE). The rest of the format was worked out by comparing 81 files with OMNIC's own exports. MIT license,
-see [LICENSE.txt](LICENSE.txt). Changes are listed in [CHANGELOG.md](CHANGELOG.md); release steps in
-[docs/RELEASING.md](docs/RELEASING.md).
+[PyMca](https://github.com/silx-kit/pymca) (V.A. Sole, European Synchrotron Radiation Facility, MIT license); see
+[NOTICE](NOTICE). The rest of the format was worked out by comparing about 80 maps with OMNIC's own exports. MIT
+license, see [LICENSE.txt](LICENSE.txt). Changes are listed in [CHANGELOG.md](CHANGELOG.md). Questions and bug reports:
+[GitHub issues](https://github.com/whtowbin/FTIR_OMNIC_MAP_Reader/issues).

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `ftir_map.__version__`.
+
+### Changed
+
+- README is a short overview that links to each page of the documentation site.
+
 ## 1.1.0 (2026-10-22)
 
 ### Added
