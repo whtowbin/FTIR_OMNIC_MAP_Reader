@@ -72,9 +72,9 @@ this package: the API, the `OmnicMap` fields and shapes, how map kinds change th
 Code uses it in this repository automatically; [Using with AI
 agents](https://ftir-omnic-map-reader.readthedocs.io/en/latest/agents/) shows how to install it for your own projects.
 
-## What's new
+## What's new in 1.1.1
 
-Since 1.1.0 (not yet on PyPI): fixes from a code review. Malformed files now raise `OmnicFormatError` (and
+Fixes from a code review, and a skill for AI coding agents (above). Malformed files now raise `OmnicFormatError` (and
 `Load_Omnic_Map` returns `None` for them, as in 1.0); a stored position count that does not match the spectra gives a
 warning instead of silent NaN positions; `unpack` keeps maps whose names differ only in case apart, records maps that
 fail as skipped rows and always writes the catalog; `to_zarr` refuses to empty an ordinary folder. The full list is in

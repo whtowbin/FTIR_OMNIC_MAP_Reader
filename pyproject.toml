@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ftir-OMNIC-map-reader"
-version = "1.1.0"
+version = "1.1.1"
 description = "Load Thermo OMNIC .map FTIR files into Python as xarray datasets"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -57,7 +57,8 @@ packages = ["src/ftir_map"]
 exclude = ["*.map", "src/ftir_map/testpoint.py"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["tests/data", "src/*.egg-info", "dist", "TODO_local.md"]
+# .remember holds local session notes; hatch reads only the root .gitignore, not the one inside that folder
+exclude = ["tests/data", "src/*.egg-info", "dist", "TODO_local.md", ".remember"]
 
 [dependency-groups]
 dev = [
