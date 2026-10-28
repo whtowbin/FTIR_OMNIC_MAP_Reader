@@ -65,6 +65,21 @@ See [Command line](https://ftir-omnic-map-reader.readthedocs.io/en/latest/cli/) 
   works; the PyMca-derived modules are deprecated.
 - [Python API](https://ftir-omnic-map-reader.readthedocs.io/en/latest/api/).
 
+## Using with AI coding agents
+
+[`.claude/skills/ftir-map/SKILL.md`](.claude/skills/ftir-map/SKILL.md) teaches coding agents (Claude Code and others)
+this package: the API, the `OmnicMap` fields and shapes, how map kinds change them, recipes and common traps. Claude
+Code uses it in this repository automatically; [Using with AI
+agents](https://ftir-omnic-map-reader.readthedocs.io/en/latest/agents/) shows how to install it for your own projects.
+
+## What's new
+
+Since 1.1.0 (not yet on PyPI): fixes from a code review. Malformed files now raise `OmnicFormatError` (and
+`Load_Omnic_Map` returns `None` for them, as in 1.0); a stored position count that does not match the spectra gives a
+warning instead of silent NaN positions; `unpack` keeps maps whose names differ only in case apart, records maps that
+fail as skipped rows and always writes the catalog; `to_zarr` refuses to empty an ordinary folder. The full list is in
+[CHANGELOG.md](CHANGELOG.md).
+
 ## Credits and license
 
 The format knowledge behind the first versions comes from the OMNIC reader in

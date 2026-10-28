@@ -26,6 +26,7 @@ m.export_all("my_map_export")  # spectra.zarr, points.csv, metadata.json and ima
 - [Unpacked projects](unpacked.md) and the [command line](cli.md): `ftir-map unpack` and the other commands.
 - [File format notes](file_format.md): the `.map` layout, with what is verified.
 - [Python API](api.md), [Migrating from 1.0](migrating.md) and the [Changelog and credits](changelog.md).
+- [Using with AI agents](agents.md): a skill file that teaches coding agents this package's API, data types and traps.
 
 ## Credits
 

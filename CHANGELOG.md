@@ -5,6 +5,8 @@
 ### Added
 
 - `ftir_map.__version__`.
+- A skill for AI coding agents, `.claude/skills/ftir-map/SKILL.md` (API, data types, map kinds, recipes, traps), and
+  the documentation page "Using with AI agents".
 
 ### Changed
 

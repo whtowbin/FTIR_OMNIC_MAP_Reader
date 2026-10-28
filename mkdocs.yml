@@ -48,6 +48,7 @@ nav:
   - File format notes: file_format.md
   - Migrating from 1.0: migrating.md
   - Python API: api.md
+  - Using with AI agents: agents.md
   - Changelog and credits: changelog.md
 
 markdown_extensions:
