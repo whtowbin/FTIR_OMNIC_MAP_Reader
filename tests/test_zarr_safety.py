@@ -130,10 +130,15 @@ def test_consolidated_metadata_is_never_used(tmp_path):
     """check_zarr_store reads the per-array metadata, so the store is opened with consolidated=False."""
     folder = tmp_path / "u"
     grid_map(tmp_path).unpack(folder)
-    root_meta = folder / "spectra.zarr" / "zarr.json"
-    content = json.loads(root_meta.read_text())
-    consolidated = content["consolidated_metadata"]["metadata"]["spectra"]
-    consolidated["codecs"].append({"name": "numcodecs.pickle"})
+    store = folder / "spectra.zarr"
+    if (store / "zarr.json").exists():  # zarr 3 (Python 3.11 and later): consolidated copy in the root zarr.json
+        root_meta = store / "zarr.json"
+        content = json.loads(root_meta.read_text())
+        content["consolidated_metadata"]["metadata"]["spectra"]["codecs"].append({"name": "numcodecs.pickle"})
+    else:  # zarr 2 (Python 3.10): consolidated copy in .zmetadata
+        root_meta = store / ".zmetadata"
+        content = json.loads(root_meta.read_text())
+        content["metadata"]["spectra/.zarray"]["filters"] = [{"id": "pickle"}]
     root_meta.write_text(json.dumps(content))
     check_zarr_store(folder / "spectra.zarr")  # the per-array metadata is still safe
     assert read_unpacked(folder).spectra.shape[0] == 6  # tampered consolidated copy is ignored
