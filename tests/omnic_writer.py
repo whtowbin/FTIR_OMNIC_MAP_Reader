@@ -40,7 +40,7 @@ def spectrum_header(title, centiseconds):
 
 def point_array(values, per_point):
     values = np.asarray(values, dtype="<f4").reshape(-1, per_point)
-    return struct.pack("<3H", len(values), per_point, 0) + values.tobytes() + b"\0\0"
+    return struct.pack("<3H", len(values) & 0xFFFF, per_point, 0) + values.tobytes() + b"\0\0"
 
 
 def tiny_bmp(width=4, height=3):
@@ -88,6 +88,7 @@ def write_map(
     with_spectra=True,
     z=None,
     image_bmp=None,
+    start_centiseconds=8878,
 ):
     """Write a map. `images` is a list of (x0, y0, x1, y1) rectangles, each given a tiny BMP video image
     (`image_bmp`, default a black one). `z` is written as the classic layout's stage-Z block."""
@@ -117,7 +118,7 @@ def write_map(
     struct.pack_into("<I", title_block, 256, int((dt.datetime(2017, 1, 11, 14, 43, 28) - EPOCH).total_seconds()))
     if layout == "extended":
         blocks.append((0x6B, 0, bytes(title_block)))
-    heads = [spectrum_header(t, 8878 + 9000 * i) for i, t in enumerate(titles)]
+    heads = [spectrum_header(t, (start_centiseconds + 9000 * i) % 2**32) for i, t in enumerate(titles)]
     if with_spectra and layout == "extended":
         series = header + bytes(56)
         for h, s in zip(heads, spectra, strict=True):

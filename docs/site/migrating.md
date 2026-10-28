@@ -21,7 +21,10 @@ metadata are identical, and `x` and `y` are relative to the first column and row
   `y_stage`. `attrs["map_kind"]` says which kind it is.
 - **Array-detector maps.** The x and y positions now come from the stored float32 values instead of the rounded text in
   the spectrum titles. They differ by up to 0.003 um.
-- **NaN.** `Load_Omnic_Map` still replaces NaN by 0, as PyMca did. `read_omnic` and its exports keep NaN as stored.
+- **NaN.** `Load_Omnic_Map` still replaces NaN by 0 (grid and per-point maps), as PyMca did. `read_omnic` and its
+  exports keep NaN as stored.
+- **Units.** The per-point result of an interferogram map names its units from the file: `unit_names["wn"]` is
+  `points` and `unit_names["data"]` is `interferogram`, not `cm^-1` and `absorbance`.
 - **Errors.** A file `Load_Omnic_Map` cannot read gives a warning and `None`, as in 1.0. `read_omnic` raises
   `OmnicFormatError` (a `ValueError`) instead.
 

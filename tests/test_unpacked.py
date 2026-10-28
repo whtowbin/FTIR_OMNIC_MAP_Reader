@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,6 +16,7 @@ import xarray as xr
 import ftir_map
 from ftir_map import Project, load, open_project, read_omnic, read_unpacked, unpack
 from ftir_map.omnic import OmnicFormatError, OmnicMap
+from ftir_map.project import find_sources, safe_name
 
 from .omnic_writer import marker_bmp, write_map
 from .test_exports import REAL_MAPS, grid_map, point_map
@@ -514,3 +516,207 @@ def test_overwrite_replaces_links_inside_a_map_folder_without_following_them(tmp
     else:
         assert not outside_file.exists() and not outside_dir.exists()
     read_unpacked(folder)
+
+
+# ------------------------------------------------------------------ review fixes: names, failures, identity
+def test_names_that_differ_only_in_case_get_different_folders(tmp_path):
+    for folder, name in (("a", "Sample.map"), ("b", "sample.map")):
+        (tmp_path / folder).mkdir()
+        write_map(tmp_path / folder / name, spectra(6) + (folder == "b"), GRID, kind="area")
+    project_dir = tmp_path / "project"
+    actions = []
+    project = unpack([tmp_path / "a", tmp_path / "b"], project_dir, progress=record(actions))
+    first, second = project.names
+    assert first == "Sample" and second.casefold() != first.casefold()
+    assert len({p.name.casefold() for p in (project_dir / "maps").iterdir()}) == 2
+    assert project.load(first).path.name == "Sample.map" and project.load(second).path.name == "sample.map"
+    again = []
+    unpack([tmp_path / "a", tmp_path / "b"], project_dir, progress=record(again))
+    assert {action for _, action in again} == {"unchanged"}
+
+
+def test_a_new_source_does_not_reuse_an_untracked_folder_in_another_case(tmp_path):
+    project_dir = tmp_path / "project"
+    (project_dir / "maps" / "SAMPLE").mkdir(parents=True)
+    (project_dir / "maps" / "SAMPLE" / "keep.txt").write_text("keep")
+    write_map(tmp_path / "sample.map", spectra(6), GRID, kind="area")
+    project = unpack([tmp_path / "sample.map"], project_dir)
+    assert project.names[0].startswith("sample_") and (project_dir / "maps" / "SAMPLE" / "keep.txt").exists()
+
+
+@pytest.mark.parametrize("name", ["CON", "nul", "Com1", "LPT9.x", "aux.tar"])
+def test_safe_name_avoids_windows_device_names(name):
+    result = safe_name(Path(f"{name}.map"))
+    assert result.partition(".")[0].upper() not in {"CON", "NUL", "COM1", "LPT9", "AUX", "PRN"}
+    assert result.replace("_", "", 1) == name
+    assert safe_name(Path("console.map")) == "console"
+
+
+def undecodable_library(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    write_map(root / "a_good.map", spectra(6), GRID, kind="area")
+    write_map(root / "b_bad.map", spectra(6), GRID, kind="area", images=[RECT], image_bmp=marker_bmp()[:40])
+    write_map(root / "c_good.map", spectra(5), LINE)
+    return root
+
+
+def test_one_undecodable_image_does_not_stop_the_project(tmp_path):
+    root = undecodable_library(tmp_path)
+    with pytest.warns(UserWarning, match="cannot be decoded"):
+        project = unpack([root], tmp_path / "project", png=True)
+    assert (tmp_path / "project" / "catalog.json").is_file() and (tmp_path / "project" / "catalog.csv").is_file()
+    assert project.names == ["a_good", "b_bad", "c_good"]  # the original bytes are kept; only the PNG copy is skipped
+    assert not list((tmp_path / "project" / "maps" / "b_bad" / "images" / "png").glob("*.png"))
+    assert len(project.load("b_bad").images) == 1
+
+
+def test_a_map_that_fails_while_unpacking_is_a_skipped_row_and_the_catalog_is_written(tmp_path, monkeypatch):
+    import ftir_map.project as project_module
+
+    root = undecodable_library(tmp_path)
+    real_unpack_map = project_module.unpack_map
+
+    def failing(m, folder, **options):
+        if m.path.name == "b_bad.map":
+            raise OSError("image file is truncated")  # as Pillow raises: no errno
+        return real_unpack_map(m, folder, **options)
+
+    monkeypatch.setattr(project_module, "unpack_map", failing)
+    actions = []
+    project = unpack([root], tmp_path / "project", progress=record(actions))
+    assert ("b_bad", "skipped") in actions and project.names == ["a_good", "c_good"]
+    (bad,) = (row for row in project.rows if row["name"] == "b_bad")
+    assert bad["status"] == "skipped: cannot unpack: image file is truncated"
+
+
+def test_a_failing_write_stops_the_run_and_the_catalog_is_written(tmp_path, monkeypatch):
+    import errno
+
+    import ftir_map.project as project_module
+
+    root = undecodable_library(tmp_path)
+    real_unpack_map = project_module.unpack_map
+
+    def disk_full(m, folder, **options):
+        if m.path.name == "b_bad.map":
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_unpack_map(m, folder, **options)
+
+    monkeypatch.setattr(project_module, "unpack_map", disk_full)
+    with pytest.raises(OSError, match="No space left"):
+        unpack([root], tmp_path / "project")
+    assert [row["name"] for row in open_project(tmp_path / "project").rows] == ["a_good"]
+
+
+def test_the_catalog_is_written_even_when_the_run_is_interrupted(tmp_path):
+    root = undecodable_library(tmp_path)
+
+    def stop(row, action):
+        if row["name"] == "b_bad":
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        unpack([root], tmp_path / "project", progress=stop)
+    assert [row["name"] for row in open_project(tmp_path / "project").rows] == ["a_good", "b_bad"]
+
+
+def test_original_images_are_not_decoded_when_the_file_gave_their_size(tmp_path, monkeypatch):
+    from ftir_map import writers
+
+    m = grid_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+
+    def refuse(stage_image):
+        raise AssertionError("decoded")
+
+    monkeypatch.setattr(writers, "decode_image", refuse)
+    (record_,) = m.save_images(tmp_path / "images", "original")
+    assert (record_["width"], record_["height"]) == (m.images[0].width, m.images[0].height)
+
+
+def test_an_undecodable_image_is_skipped_with_a_warning_when_it_must_be_decoded(tmp_path):
+    m = grid_map(tmp_path, images=[RECT], image_bmp=marker_bmp()[:40])
+    with pytest.warns(UserWarning, match="cannot be decoded"):
+        assert m.save_images(tmp_path / "images", "png") == []
+
+
+def test_unpack_refuses_a_symlinked_catalog_file(library, tmp_path):
+    project_dir = tmp_path / "project"
+    unpack([library], project_dir)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("precious")
+    for name in ("catalog.csv", "catalog.json"):
+        (project_dir / name).unlink()
+        (project_dir / name).symlink_to(victim)
+        with pytest.raises(ValueError, match="symbolic link"):
+            unpack([library], project_dir)
+        (project_dir / name).unlink()
+        (project_dir / name).write_text("{}" if name.endswith("json") else "")
+    assert victim.read_text() == "precious"
+
+
+def test_the_same_folder_spelled_in_another_case_is_one_source(tmp_path):
+    (tmp_path / "Data").mkdir()
+    write_map(tmp_path / "Data" / "x.map", spectra(6), GRID, kind="area")
+    other = tmp_path / "data"
+    if not other.exists():
+        pytest.skip("case-sensitive file system")
+    actions = []
+    unpack([tmp_path / "Data"], tmp_path / "project")
+    project = unpack([other], tmp_path / "project", progress=record(actions))
+    assert actions == [("x", "unchanged")] and len(project.rows) == 1
+    assert len(find_sources([tmp_path / "Data", other])) == 1
+
+
+def test_a_symlinked_source_is_one_source(tmp_path):
+    write_map(tmp_path / "x.map", spectra(6), GRID, kind="area")
+    (tmp_path / "link.map").symlink_to(tmp_path / "x.map")
+    project = unpack([tmp_path / "x.map", tmp_path / "link.map"], tmp_path / "project")
+    assert len(project.rows) == 1
+
+
+def test_json_nan_in_images_and_backgrounds_is_null(tmp_path):
+    m = grid_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+    m.images[0].extent = (float("nan"), 1.0, 2.0, 3.0)
+    m.unpack(tmp_path / "out")
+    text = (tmp_path / "out" / "map.json").read_text()
+    assert "NaN" not in text
+    json.loads(text, parse_constant=lambda name: pytest.fail(name))
+    extent = read_unpacked(tmp_path / "out").images[0].extent
+    assert extent is not None and np.isnan(extent[0])
+
+
+def test_netcdf_with_external_storage_is_refused(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    pytest.importorskip("h5netcdf")
+    from ftir_map.unpacked import UnsafeNetcdfFile
+
+    m = grid_map(tmp_path)
+    m.unpack(tmp_path / "u", spectra="nc")
+    read_unpacked(tmp_path / "u")  # a file written by unpack passes the check
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"x" * 1024)
+    with h5py.File(tmp_path / "u" / "spectra.nc", "r+") as file:
+        file.create_dataset("leak", shape=(8,), dtype="<f4", external=[(str(secret), 0, 32)])
+    with pytest.raises(UnsafeNetcdfFile, match="another file"):
+        read_unpacked(tmp_path / "u")
+
+
+def test_netcdf_with_an_external_link_or_virtual_dataset_is_refused(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    pytest.importorskip("h5netcdf")
+    from ftir_map.unpacked import UnsafeNetcdfFile
+
+    grid_map(tmp_path).unpack(tmp_path / "u", spectra="nc")
+    nc = tmp_path / "u" / "spectra.nc"
+    with h5py.File(nc, "r+") as file:
+        file["link"] = h5py.ExternalLink(str(tmp_path / "other.h5"), "/x")
+    with pytest.raises(UnsafeNetcdfFile, match="link"):
+        read_unpacked(tmp_path / "u")
+    with h5py.File(nc, "r+") as file:
+        del file["link"]
+        layout = h5py.VirtualLayout(shape=(4,), dtype="<f4")
+        layout[:] = h5py.VirtualSource(str(tmp_path / "other.h5"), "x", shape=(4,))
+        file.create_virtual_dataset("virtual", layout)
+    with pytest.raises(UnsafeNetcdfFile, match="another file"):
+        read_unpacked(tmp_path / "u")

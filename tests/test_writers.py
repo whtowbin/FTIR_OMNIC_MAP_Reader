@@ -10,7 +10,7 @@ import pytest
 import xarray as xr
 from PIL import Image
 
-from ftir_map import read_omnic
+from ftir_map import read_omnic, read_unpacked
 from ftir_map.exports import build_metadata
 from ftir_map.writers import csv_cell, flatten_metadata, points_table, world_file_text
 
@@ -351,7 +351,7 @@ def test_cli_export_on_a_real_map(tmp_path):
     ]
     assert (out / "images" / "image_01.tfw").exists()
     again = run_cli("export", str(path), "--out", str(out))
-    assert again.returncode == 1 and "overwrite=True" in again.stderr
+    assert again.returncode == 1 and "--overwrite" in again.stderr
     assert run_cli("export", str(path), "--out", str(out), "--spectra", "npz", "--overwrite").returncode == 0
 
 
@@ -389,3 +389,74 @@ def test_points_csv_escapes_untrusted_titles(tmp_path):
     with out.open(newline="", encoding="utf-8") as file:
         first = next(csv.DictReader(file))
     assert first["title"] == "'=1+1"
+
+
+# ------------------------------------------------------------------ review fixes
+@pytest.mark.parametrize("title", ["'=x", "'+1", "''", "'", "=x", "'plain", "@a", "-5", "ok"])
+def test_titles_with_quotes_and_formula_characters_round_trip_through_csv(tmp_path, title):
+    m = grid_map(tmp_path)
+    m.titles[0] = title
+    m.unpack(tmp_path / "out", spectra="csv")
+    assert read_unpacked(tmp_path / "out").titles[0] == title
+    assert csv_cell(title).startswith("'") == title.startswith(("'", "=", "+", "-", "@"))
+
+
+def test_export_all_with_a_missing_optional_package_writes_nothing(tmp_path, monkeypatch):
+    import importlib
+
+    real_import = importlib.import_module
+
+    def without_pyarrow(name, *args, **kwargs):
+        if name.split(".")[0] == "pyarrow":
+            raise ImportError("no pyarrow")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", without_pyarrow)
+    out = tmp_path / "out"
+    with pytest.raises(ImportError, match="pyarrow"):
+        grid_map(tmp_path, images=[RECT], image_bmp=marker_bmp()).export_all(out, points="parquet")
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(("kind", "package"), [("metadata", "yaml"), ("spectra", "zarr")])
+def test_export_all_checks_every_chosen_format_before_writing(tmp_path, monkeypatch, kind, package):
+    import importlib
+
+    real_import = importlib.import_module
+
+    def without(name, *args, **kwargs):
+        if name == package:
+            raise ImportError(f"no {package}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", without)
+    options = {"metadata": "yaml"} if kind == "metadata" else {"spectra": "zarr"}
+    with pytest.raises(ImportError):
+        grid_map(tmp_path).export_all(tmp_path / "out", **options)
+    assert not (tmp_path / "out").exists()
+
+
+def test_save_spectra_zarr_refuses_an_ordinary_folder_with_files(tmp_path):
+    pytest.importorskip("zarr")
+    m = grid_map(tmp_path)
+    folder = tmp_path / "results"
+    folder.mkdir()
+    (folder / "important.txt").write_text("keep")
+    with pytest.raises(FileExistsError, match="not a Zarr store"):
+        m.save_spectra(folder, "zarr")
+    assert (folder / "important.txt").read_text() == "keep"
+    m.save_spectra(tmp_path / "s.zarr", "zarr")
+    m.save_spectra(tmp_path / "s.zarr", "zarr")  # an existing store is still replaced
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    m.save_spectra(empty, "zarr")  # so is an empty folder
+
+
+def test_to_zarr_mode_w_refuses_an_ordinary_folder_with_files(tmp_path):
+    pytest.importorskip("zarr")
+    folder = tmp_path / "results"
+    folder.mkdir()
+    (folder / "important.txt").write_text("keep")
+    with pytest.raises(FileExistsError, match="not a Zarr store"):
+        grid_map(tmp_path).to_zarr(folder, mode="w")
+    assert (folder / "important.txt").exists()

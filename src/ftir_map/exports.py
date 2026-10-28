@@ -24,7 +24,7 @@ import xarray as xr
 from PIL import Image
 
 if TYPE_CHECKING:
-    from .omnic import OmnicMap
+    from .omnic import OmnicMap, StageImage
 
 PACKAGE_NAME = "ftir-OMNIC-map-reader"
 NOT_GRIDDED_FILL_INDEX = -1  # background_index of a grid cell that holds no spectrum
@@ -262,18 +262,32 @@ def to_dict(m: OmnicMap) -> dict[str, Any]:
 def to_zarr(m: OmnicMap, path: str | Path, mode: Literal["w", "w-"] = "w-") -> None:
     """Write `to_xarray(m)` to a Zarr store at `path`. `mode="w-"` refuses to overwrite an existing store.
 
+    `mode="w"` replaces a file or an existing Zarr store, but never a non-empty ordinary folder.
+
     Raises:
         ImportError: if the zarr package is not installed.
-        FileExistsError: if `mode="w-"` and `path` exists.
+        FileExistsError: if `mode="w-"` and `path` exists, or `mode="w"` and `path` is a
+            non-empty folder that is not a Zarr store.
     """
     if mode == "w-" and Path(path).exists():
         raise FileExistsError(f"{path} exists; pass mode='w' to replace it")
     dataset_to_zarr(to_xarray(m), path, mode)
 
 
+def _is_zarr_store(folder: Path) -> bool:
+    """True if `folder` has Zarr metadata at its top (zarr.json for format 3, .zgroup or .zarray for format 2)."""
+    return any((folder / name).is_file() for name in ("zarr.json", ".zgroup", ".zarray"))
+
+
 def dataset_to_zarr(dataset: xr.Dataset, path: str | Path, mode: Literal["w", "w-"] = "w-") -> None:
-    """Write any dataset to a Zarr store, without zarr 3's warning about consolidated metadata."""
+    """Write any dataset to a Zarr store, without zarr 3's warning about consolidated metadata.
+
+    Raises FileExistsError for `mode="w"` on a folder that holds files but is not a Zarr store: xarray would empty it.
+    """
     import_optional("zarr", "zarr", "to_zarr")
+    target = Path(path)
+    if mode == "w" and target.is_dir() and any(target.iterdir()) and not _is_zarr_store(target):
+        raise FileExistsError(f"{path} is a folder that is not a Zarr store; refusing to replace it")
     with warnings.catch_warnings():
         # zarr 3 warns that consolidated metadata is outside its spec; xarray still reads it back fastest
         warnings.filterwarnings("ignore", message="Consolidated metadata")
@@ -288,10 +302,12 @@ def to_images(m: OmnicMap) -> list[ImageArray]:
     no flip, and the extent is (xmin, xmax, ymin, ymax) for `imshow(array, extent=extent)` with the default
     `origin="upper"`.
     """
-    out = []
-    for stage_image in m.images:
-        # Decode only the format the block declares ("BMP" or "JPEG"); never let Pillow guess from file content.
-        with Image.open(io.BytesIO(stage_image.data), formats=[stage_image.format]) as decoded:
-            array = np.asarray(decoded.convert("RGB"))
-        out.append(ImageArray(stage_image.index, stage_image.format, array, stage_image.stage_extent))
-    return out
+    return [decode_image(stage_image) for stage_image in m.images]
+
+
+def decode_image(stage_image: StageImage) -> ImageArray:
+    """One embedded image as an upright RGB array. Raises OSError (or a Pillow error) if the bytes cannot be decoded."""
+    # Decode only the format the block declares ("BMP" or "JPEG"); never let Pillow guess from file content.
+    with Image.open(io.BytesIO(stage_image.data), formats=[stage_image.format]) as decoded:
+        array = np.asarray(decoded.convert("RGB"))
+    return ImageArray(stage_image.index, stage_image.format, array, stage_image.stage_extent)

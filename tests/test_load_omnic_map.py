@@ -12,7 +12,7 @@ import xarray as xr
 from ftir_map.LoadOmnicMAP import Load_Omnic_Map
 
 from .omnic_writer import write_map
-from .test_omnic import ARRAY_MAP, GRID, LINE, N_WN, POINTS, as_stored, real, spectra
+from .test_omnic import ARRAY_MAP, GRID, HOSTILE, LINE, N_WN, POINTS, as_stored, hostile_files, real, spectra
 
 
 def load_dataset(path) -> xr.Dataset:
@@ -184,3 +184,43 @@ def test_new_api_does_not_import_the_deprecated_modules():
     )
     result = run_python(code)
     assert result.stdout.strip() == "[]" and "DeprecationWarning" not in result.stderr
+
+
+def test_nan_becomes_zero_on_the_grid_path(tmp_path):
+    values = spectra(6)
+    values[2, 5] = np.nan
+    path = tmp_path / "grid.map"
+    write_map(path, values, GRID, kind="area")
+    ds = load_dataset(path)
+    assert ds["spectra"].isnull().sum() == 0
+    assert ds["spectra"].values[0, 2, 5] == 0.0
+
+
+def test_nan_becomes_zero_on_the_per_point_path(tmp_path):
+    values = spectra(4)
+    values[1, 3] = np.nan
+    values[2, 4] = np.inf
+    path = tmp_path / "points.map"
+    write_map(path, values, POINTS)
+    data = load_dict(path)["data"]
+    assert data[1, 3] == 0.0 and data[2, 4] == 0.0 and np.isfinite(data).all()
+    assert data[0, 0] == values[0, 0]
+
+
+def test_interferogram_map_has_point_and_interferogram_units(tmp_path):
+    path = tmp_path / "ifg.map"
+    write_map(path, spectra(5), LINE, first_x=float(N_WN - 1), last_x=0.0, data_kind="interferogram")
+    ds = load_dataset(path)
+    assert ds.attrs["unit_names"]["wn"] == "points" and ds.attrs["unit_names"]["data"] == "interferogram"
+    assert ds.attrs["unit_long_names"]["wn"] == "points"
+    path = tmp_path / "line.map"
+    write_map(path, spectra(5), LINE)
+    names = load_dataset(path).attrs["unit_names"]
+    assert names["wn"] == "cm^-1" and names["data"] == "absorbance"
+
+
+@pytest.mark.parametrize("name", HOSTILE)
+def test_malformed_files_warn_and_return_none(tmp_path, name):
+    path = hostile_files(tmp_path)[name]
+    with pytest.warns(UserWarning, match="Unable to load"):
+        assert Load_Omnic_Map(str(path)) is None

@@ -96,6 +96,17 @@ The first entry of the extended line scan `GCB_1C_GC52_CPX profile ... 256 avg.m
 | 0x145 | 1 | 264 | map display block: title, axis labels, and at +66 six float32 (y0, y1, dy, x0, x1, dx), PyMca's "map description" | the floats | consistent |
 | 0x14B | 1..m | variable | uint32 length + JPEG file: one mosaic tile | yes | consistent |
 
+### How the reader handles malformed blocks
+
+- A file shorter than its header or directory, a key-2 block shorter than 140 bytes, a 0x12d block shorter than its
+  196-byte prefix, an image block without its length field, or a header that says 0 points per spectrum raises
+  `OmnicFormatError`.
+- The key-6 count is a uint16, so a map of more than 65535 spectra cannot store all its positions. Whenever a key-6
+  array (positions, background indices or Z) does not hold one entry per spectrum, the reader warns with both counts
+  and ignores that array; positions become NaN. It does not truncate or pad.
+- When the spectral axis is stored descending in cm⁻¹, the map's spectra and axis and every background's spectrum and
+  wavenumber are reversed to ascending. Interferogram axes (data points) are kept as stored.
+
 ### Not found in any file
 
 These were searched for as text and as float32/float64 values:

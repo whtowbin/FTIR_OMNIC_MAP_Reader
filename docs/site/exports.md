@@ -123,7 +123,9 @@ A plain dict of NumPy arrays, lists and dicts:
 ## `to_zarr(path, mode="w-")`
 
 Writes `to_xarray()` to a Zarr store. Zarr is a core dependency. The default mode refuses to overwrite an existing store; pass
-`mode="w"` to replace it. Read it back with `xarray.open_zarr(path)`; the result equals `to_xarray()`.
+`mode="w"` to replace it. `mode="w"` replaces a file or an existing Zarr store (one with a `zarr.json`, `.zgroup` or
+`.zarray`), but raises `FileExistsError` for an ordinary folder that holds other files, because Zarr would delete
+everything in it. `save_spectra(..., "zarr")` behaves the same. Read it back with `xarray.open_zarr(path)`; the result equals `to_xarray()`.
 
 ## `to_images()`
 
@@ -162,9 +164,9 @@ m.export_all("my_map_export")  # all of the above in one folder with a README.tx
 
 !!! note "CSV and spreadsheets"
     Titles and other text in a CSV come from the `.map` file, so they are untrusted input. Every CSV field that
-    starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'`, so that Excel and similar programs
-    show it as text instead of running it as a formula. Numbers are written unchanged. `read_unpacked` removes the
-    quote again when it reads an unpacked `points.csv` back.
+    starts with `=`, `+`, `-`, `@`, `'`, a tab or a carriage return gets a leading `'`, so that Excel and similar programs
+    show it as text instead of running it as a formula. Numbers are written unchanged. `read_unpacked` removes exactly
+    one quote again when it reads an unpacked `points.csv` back, so a title such as `'=x` comes back unchanged.
 
 ### `save_metadata(path, format=None)`
 
@@ -233,7 +235,7 @@ Writes `image_01`, `image_02`, ... for each video image or mosaic tile, each wit
 | `"tiff"` | `image_01.tif` | `.tfw` |
 | `"original"` | `image_01.bmp` or `.jpg`, the embedded bytes unchanged | `.bpw` or `.jgw` |
 
-An image is decoded only in the format its block declares (BMP or JPEG). A map without images writes nothing and returns `[]`; otherwise the function returns the index records.
+An image is decoded only in the format its block declares (BMP or JPEG). An image that cannot be decoded is skipped with a warning and has no record. `"original"` does not decode at all when the file gave the image size. A map without images writes nothing and returns `[]`; otherwise the function returns the index records.
 
 The world file has six lines, in stage um: pixel size in x, 0, 0, minus the pixel size in y, and x and y of the upper-left pixel centre (half a pixel inside the corner `xmin`, `ymax`). The images are upright ([File format notes](file_format.md#8-images-and-registration)), so this places them in ImageJ, QGIS and similar programs. The stage coordinate system has no projection. Images with no stage rectangle get no world file.
 
@@ -268,7 +270,7 @@ out/
   images/           image_01.png, image_01.pgw, ..., images.json, images.csv (left out if the map has no images)
 ```
 
-`images="none"` leaves the folder out. All formats are checked before anything is written. It raises `FileExistsError` if `folder` exists and is not empty, unless `overwrite=True`; files already in the folder that it does not write are kept.
+`images="none"` leaves the folder out. All formats, and the optional packages they need (PyYAML, pyarrow, h5netcdf, zarr), are checked before anything is written. It raises `FileExistsError` if `folder` exists and is not empty, unless `overwrite=True`; files already in the folder that it does not write are kept.
 
 ## Command line
 

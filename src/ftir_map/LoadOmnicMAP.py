@@ -22,6 +22,14 @@ UNIT_NAMES = {"x": "um", "y": "um", "wn": "cm^-1", "data": "absorbance"}
 UNIT_LONG_NAMES = {"x": "microns", "y": "microns", "wn": "wavenumbers", "data": "absorbance"}
 
 
+def _units(m: OmnicMap) -> tuple[dict, dict]:
+    """(unit_names, unit_long_names): the spectral axis and data units follow the map (cm^-1 and absorbance for
+    ordinary spectra; points and the data kind for an interferogram map)."""
+    wn, wn_long = ("cm^-1", "wavenumbers") if m.axis_unit == "cm-1" else (m.axis_unit, m.axis_unit)
+    names = {**UNIT_NAMES, "wn": wn, "data": m.data_kind}
+    return names, {**UNIT_LONG_NAMES, "wn": wn_long, "data": m.data_kind}
+
+
 def _omnic_info(m: OmnicMap) -> dict:
     """The keys of PyMca's OmnicMap.info["OmnicInfo"]."""
     c = m.collection
@@ -73,7 +81,8 @@ def _grid_dataset(m: OmnicMap) -> xr.Dataset:
     cube = numpy.zeros((n_rows, n_columns, spectra.shape[1]), dtype=numpy.float32)
     cube[row, col] = spectra
     xs, ys = grid_axis_values(m.x, col, n_columns), grid_axis_values(m.y, row, n_rows)
-    metadata = {"unit_names": UNIT_NAMES, "unit_long_names": UNIT_LONG_NAMES, **_legacy_info(m, n_rows, n_columns)}
+    names, long_names = _units(m)
+    metadata = {"unit_names": names, "unit_long_names": long_names, **_legacy_info(m, n_rows, n_columns)}
     coords = {"x": xs - xs[0], "y": ys - ys[0], "wn": m.axis}
     return xr.Dataset(data_vars={"spectra": (["y", "x", "wn"], cube)}, coords=coords, attrs=metadata)
 
@@ -87,9 +96,12 @@ def _point_dataset(m: OmnicMap) -> xr.Dataset:
         "x_stage": ("point", m.x),
         "y_stage": ("point", m.y),
     }
-    metadata = {"unit_names": UNIT_NAMES, "unit_long_names": UNIT_LONG_NAMES, "map_kind": m.map_kind}
+    names, long_names = _units(m)
+    metadata = {"unit_names": names, "unit_long_names": long_names, "map_kind": m.map_kind}
     metadata.update(data_kind=m.data_kind, OmnicInfo=_omnic_info(m), SourceName=[str(m.path)])
-    return xr.Dataset(data_vars={"spectra": (["point", "wn"], m.spectra)}, coords=coords, attrs=metadata)
+    # NaN to zero, as on the grid path
+    spectra = numpy.where(numpy.isfinite(m.spectra), m.spectra, 0.0).astype(numpy.float32)
+    return xr.Dataset(data_vars={"spectra": (["point", "wn"], spectra)}, coords=coords, attrs=metadata)
 
 
 @overload

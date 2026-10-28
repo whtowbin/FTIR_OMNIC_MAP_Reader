@@ -6,18 +6,22 @@ in `m.spectra` as `(n_points, n_axis)`, in the order OMNIC acquired them; the ki
 | `map_kind` | What it is | `grid_shape`, `grid_index` | `to_xarray()` dimensions of `spectra` |
 |---|---|---|---|
 | `grid` | rectangular area map | set | `(y, x, wavenumber)` |
-| `array` | array-detector map; its pixels fill a grid | set | `(y, x, wavenumber)` |
+| `array` | array-detector map | set when its pixels fill a complete grid, else `None` | `(y, x, wavenumber)` with a grid, else `(point, wavenumber)` |
 | `line` | profile along a line | `None` | `(point, wavenumber)` |
 | `points` | point-to-point map or irregular positions | `None` | `(point, wavenumber)` |
 
 - `grid_shape` is `(n_rows, n_columns)`. `grid_index` is a pair of integer arrays `(row, column)`, one entry per
   spectrum, so `m.spectra_grid()` returns the spectra as `(n_rows, n_columns, n_axis)`. Row 0 has the smallest stage Y
   and column 0 the smallest stage X. A layout is only recognized when every cell of the grid holds exactly one
-  spectrum; otherwise `grid_shape` and `grid_index` are `None` and the map is read per point.
+  spectrum; otherwise `grid_shape` and `grid_index` are `None` and the map is read per point. Two stage coordinates
+  are the same row or column when they differ by less than 0.5 um and by less than a tenth of the largest gap between
+  distinct coordinates, so grids with steps finer than 0.5 um are recognized.
 - The kind comes from the spectrum titles, the stage positions and the map definition stored in the file. A file
   whose spectra are titled "Pixel ..." is `array`. A map whose definition says "points" is `points`. Otherwise
   positions that fill a regular grid give `grid`, positions on one straight line give `line`, and everything else is
   `points`.
+- An `array` map whose pixels do not fill a complete grid has `grid_shape` and `grid_index` set to `None`, like
+  `line` and `points` maps.
 - For `line` and `points` maps there is no grid; use `m.x` and `m.y`. `m.z` holds the stage Z (focus) of each spectrum
   when the file records it, which the classic layout does for point maps.
 

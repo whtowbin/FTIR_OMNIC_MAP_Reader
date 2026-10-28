@@ -3,14 +3,16 @@
 import datetime as dt
 import json
 import os
+import struct
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from ftir_map import omnic
 from ftir_map.omnic import OmnicFormatError, grid_layout, read_omnic
 
-from .omnic_writer import write_map
+from .omnic_writer import _write, spectral_header, write_map
 
 DATA = Path(__file__).parent / "data"
 ARRAY_MAP = DATA / "921005-6-plaig2-1p-array-1.map"
@@ -131,6 +133,135 @@ def test_not_an_omnic_file(tmp_path):
     path.write_bytes(b"6.749918e+002,1.54\n" * 40)
     with pytest.raises(OmnicFormatError, match="not an OMNIC container"):
         read_omnic(path)
+
+
+def test_points_without_a_definition_that_are_not_collinear(tmp_path):
+    path = tmp_path / "scattered.map"
+    write_map(path, spectra(4), POINTS, kind=None)
+    m = read_omnic(path)
+    assert m.map_kind == "points" and m.grid_shape is None
+
+
+@pytest.mark.parametrize("step", [0.4, 0.05, 1.0, 25.0])
+def test_fine_grid_steps_are_still_a_grid(tmp_path, step):
+    positions = [[1000.0 + step * i, 2000.0 + step * j] for j in range(3) for i in range(4)]
+    path = tmp_path / "fine.map"
+    write_map(path, spectra(12), positions, kind=None)
+    m = read_omnic(path)
+    assert m.map_kind == "grid" and m.grid_shape == (3, 4)
+
+
+def test_jittered_grid_is_still_a_grid():
+    rng = np.random.default_rng(0)
+    x = np.array([25.0 * i + rng.uniform(-0.3, 0.3) for _ in range(3) for i in range(4)])
+    y = np.array([25.0 * j + rng.uniform(-0.3, 0.3) for j in range(3) for _ in range(4)])
+    assert grid_layout(x, y)[0] == (3, 4)
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_descending_wavenumber_axis_is_reversed_with_spectra_and_backgrounds(tmp_path, layout):
+    path = tmp_path / "descending.map"
+    write_map(path, spectra(4), POINTS, layout=layout, first_x=4000.0, last_x=650.0)
+    m = read_omnic(path)
+    np.testing.assert_allclose(m.axis, np.linspace(650.0, 4000.0, N_WN), rtol=1e-6)
+    np.testing.assert_array_equal(m.spectra, spectra(4)[:, ::-1])
+    (bkg,) = m.backgrounds
+    np.testing.assert_allclose(bkg.wavenumber, m.axis, rtol=1e-6)
+    np.testing.assert_allclose(bkg.spectrum, np.linspace(2.0, 1.0, N_WN), rtol=1e-6)  # stored 1 -> 2 at 4000 -> 650
+
+
+def test_time_counter_wraps_at_2_to_the_32(tmp_path):
+    path = tmp_path / "wrap.map"
+    write_map(path, spectra(4), POINTS, start_centiseconds=2**32 - 9000)
+    np.testing.assert_allclose(read_omnic(path).times_s, [0.0, 90.0, 180.0, 270.0])
+
+
+def test_position_count_mismatch_warns_and_keeps_nan(tmp_path):
+    path = tmp_path / "short_positions.map"
+    write_map(path, spectra(4), POINTS[:3], kind=None)
+    with pytest.warns(UserWarning, match="3 stage positions for 4 spectra"):
+        m = read_omnic(path)
+    assert np.isnan(m.x).all() and m.map_kind == "points"
+    assert m.background_index is not None  # the other arrays are fine
+
+
+def test_background_index_count_mismatch_warns(tmp_path):
+    path = tmp_path / "bkg.map"
+    write_map(path, spectra(4), POINTS)
+    data = bytearray(path.read_bytes())
+    marker = struct.pack("<3H", 4, 1, 0)  # the index-3 array of 4 spectra
+    at = data.index(marker)
+    data[at : at + 2] = struct.pack("<H", 3)
+    path.write_bytes(bytes(data))
+    with pytest.warns(UserWarning, match="3 background indices for 4 spectra"):
+        assert read_omnic(path).background_index is None
+
+
+def test_more_than_65535_spectra_warn_about_the_16_bit_count(tmp_path):
+    n = 65537
+    path = tmp_path / "many.map"
+    write_map(path, np.zeros((n, 2), dtype=np.float32), np.zeros((n, 2)), first_x=650.0, last_x=4000.0)
+    with pytest.warns(UserWarning, match="16-bit"):
+        m = read_omnic(path)
+    assert m.n_points == n and np.isnan(m.x).all()
+
+
+def hostile_files(tmp_path):
+    """Malformed files that used to raise struct.error, IndexError or a NumPy error: name -> path."""
+    out = {}
+
+    def add(name, data):
+        out[name] = tmp_path / f"{name}.map"
+        out[name].write_bytes(data)
+
+    add("magic_only", b"Spectral Exte File" + bytes(100))
+    add("classic_magic_only", b"Spectral Data File")
+    write_map(tmp_path / "ok.map", spectra(6), GRID, kind="area")
+    data = bytearray((tmp_path / "ok.map").read_bytes())
+    struct.pack_into("<H", data, 0x126, 60000)
+    add("huge_directory", bytes(data[:5000]))
+    out["short_header"] = tmp_path / "short_header.map"
+    _write(out["short_header"], "classic", [(3, 1, bytes(148)), (2, 1, spectral_header(37, 650, 4000)[:40])])
+    out["short_series"] = tmp_path / "short_series.map"
+    _write(out["short_series"], "extended", [(2, 1, spectral_header(4, 650, 4000)), (0x12D, 1, bytes(100))])
+    out["image_2_bytes"] = tmp_path / "image_2_bytes.map"
+    blocks = [(2, 1, spectral_header(4, 650, 4000)), (0x94, 1, bytes(96)), (3, 1, bytes(16)), (0x93, 1, b"\x01\x00")]
+    _write(out["image_2_bytes"], "classic", blocks)
+    out["zero_points"] = tmp_path / "zero_points.map"
+    blocks = [(2, 1, spectral_header(0, 650, 4000)), (0x94, 1, bytes(96)), (3, 1, bytes(0))]
+    _write(out["zero_points"], "classic", blocks)
+    return out
+
+
+HOSTILE = [
+    "magic_only",
+    "classic_magic_only",
+    "huge_directory",
+    "short_header",
+    "short_series",
+    "image_2_bytes",
+    "zero_points",
+]
+
+
+@pytest.mark.parametrize("name", HOSTILE)
+def test_malformed_files_raise_omnic_format_error(tmp_path, name):
+    with pytest.raises(OmnicFormatError):
+        read_omnic(hostile_files(tmp_path)[name])
+
+
+def test_struct_errors_from_parsing_become_omnic_format_errors(tmp_path):
+    """The safety net: a malformed block no size check anticipated still gives OmnicFormatError."""
+    path = tmp_path / "map.map"
+    write_map(path, spectra(4), POINTS)
+
+    def boom(*args, **kwargs):
+        raise struct.error("unpack requires a buffer of 4 bytes")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(omnic, "_map_definition", boom)
+        with pytest.raises(OmnicFormatError, match="malformed file"):
+            read_omnic(path)
 
 
 def test_grid_layout_rejects_incomplete_grids():

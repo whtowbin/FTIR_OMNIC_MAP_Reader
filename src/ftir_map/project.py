@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 import struct
 from collections.abc import Callable, Iterable, Iterator
@@ -19,7 +20,7 @@ import numpy as np
 
 from .exports import reader_version
 from .omnic import OmnicFormatError, OmnicMap, read_omnic
-from .unpacked import MAP_JSON, contained, read_unpacked, sha256_file, unpack_map
+from .unpacked import MAP_JSON, SPECTRA_FORMATS, contained, read_unpacked, sha256_file, unpack_map
 from .writers import write_csv, write_json
 
 PROJECT_FORMAT = "ftir-map project"
@@ -48,6 +49,9 @@ CATALOG_COLUMNS = (
     "status",
 )
 NAME_LENGTH = 80
+WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+)
 UNREADABLE = (OSError, ValueError, struct.error)  # OmnicFormatError is a ValueError
 
 Row = dict[str, Any]
@@ -58,9 +62,12 @@ Progress = Callable[[Row, str], None]
 def find_sources(sources: Iterable[str | Path], exclude: Path | None = None) -> list[Path]:
     """The given files, plus every .map file under the given folders, sorted, without duplicates.
 
-    Anything inside `exclude` (the project folder) is left out, so a copied source is never found again.
+    Anything inside `exclude` (the project folder) is left out, so a copied source is never found again. A file is a
+    duplicate when it has the same path or the same identity on disk (so a folder given in another case, or through a
+    link, does not list its files twice).
     """
     found: dict[Path, None] = {}
+    identities: set[tuple[int, int]] = set()
     for source in map(Path, sources):
         if source.is_dir():
             candidates = sorted(p for p in source.rglob("*") if p.suffix.lower() == ".map" and p.is_file())
@@ -70,15 +77,27 @@ def find_sources(sources: Iterable[str | Path], exclude: Path | None = None) -> 
             raise FileNotFoundError(f"{source} does not exist")
         for path in candidates:
             resolved = path.resolve()
-            if exclude is None or not resolved.is_relative_to(exclude):
+            identity = file_identity(resolved)
+            if (exclude is None or not resolved.is_relative_to(exclude)) and identity not in identities:
                 found[resolved] = None
+                identities.add(identity)
     return list(found)
 
 
+def file_identity(path: str | Path) -> tuple[int, int]:
+    """(device, inode) of a file, which is the same for every spelling of its path (case, links)."""
+    status = os.stat(path)
+    return status.st_dev, status.st_ino
+
+
 def safe_name(path: Path) -> str:
-    """File stem with every character outside letters, digits, dot, dash and underscore replaced by `_`."""
-    name = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem).strip("._-")[:NAME_LENGTH]
-    return name or "map"
+    """File stem with every character outside letters, digits, dot, dash and underscore replaced by `_`.
+
+    A name Windows reserves for devices (CON, NUL, COM1, ... with any extension) gets an underscore after its first part.
+    """
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem).strip("._-")[:NAME_LENGTH] or "map"
+    head, dot, rest = name.partition(".")
+    return f"{head}_{dot}{rest}" if head.upper() in WINDOWS_RESERVED else name
 
 
 _NAME = re.compile(r"[A-Za-z0-9._-]+")
@@ -90,12 +109,15 @@ def valid_name(name: object) -> bool:
 
 
 def unique_name(path: Path, sha256: str, taken: set[str]) -> str:
-    """`safe_name`, with the first 8 characters of the checksum appended (then a counter) if it is already taken."""
+    """`safe_name`, with the first 8 characters of the checksum appended (then a counter) if it is already taken.
+
+    `taken` holds case-folded names: macOS and Windows file systems treat "Sample" and "sample" as one folder.
+    """
     name = safe_name(path)
-    if name in taken:
+    if name.casefold() in taken:
         name = f"{name}_{sha256[:8]}"
     candidate, count = name, 2
-    while candidate in taken:
+    while candidate.casefold() in taken:
         candidate, count = f"{name}_{count}", count + 1
     return candidate
 
@@ -166,7 +188,8 @@ def _unpack_one(
 ) -> tuple[Row, str]:
     """(catalog row, action) for one source file; action is "unpacked", "unchanged" or "skipped".
 
-    `options` are the `unpack_map` options `spectra`, `png` and `copy_source`.
+    `options` are the `unpack_map` options `spectra`, `png` and `copy_source`. A file that cannot be read, or whose
+    unpacking fails, becomes a skipped row; `taken` holds case-folded folder names.
     """
     sha256 = sha256_file(path)
     if existing and not overwrite and _is_current(existing, sha256, project_dir):
@@ -178,7 +201,13 @@ def _unpack_one(
     except UNREADABLE as error:
         reason = str(error).removeprefix(f"{path.name}: ")
         return skipped_row(name, path, sha256, reason), "skipped"
-    unpack_map(m, map_folder_for_writing(project_dir, name), overwrite=True, sha256=sha256, **options)
+    folder = map_folder_for_writing(project_dir, name)  # a symbolic link is an error, not a skipped map
+    try:
+        unpack_map(m, folder, overwrite=True, sha256=sha256, **options)
+    except UNREADABLE as error:
+        if isinstance(error, OSError) and error.errno is not None:
+            raise  # the system refused a write (disk full, permissions): stop rather than skip every map
+        return skipped_row(name, path, sha256, f"cannot unpack: {error}"), "skipped"
     return catalog_row(name, m, sha256), "unpacked"
 
 
@@ -209,34 +238,54 @@ def unpack(
     Each readable map goes to `maps/<name>/` (see `unpack_map` for the options) and every file, readable or not, gets
     a row in `catalog.csv` and `catalog.json`. A file that cannot be read (for example a mosaic-only map) is listed
     with status "skipped: <reason>" and does not stop the run. A map whose file content (sha256) matches the catalog is
-    left alone unless `overwrite` is True, even if other options changed. `progress(row, action)` is called after each
-    file, with action "unpacked", "unchanged" or "skipped". Returns the opened project.
+    left alone unless `overwrite` is True, even if other options changed. A map that fails while it is written (for
+    example an image that cannot be decoded) is listed as skipped too, and the catalog is written even if the run is
+    interrupted. `progress(row, action)` is called after each file, with action "unpacked", "unchanged" or "skipped".
+    Returns the opened project.
 
     Raises:
         FileNotFoundError: if a source does not exist.
-        ValueError: for an unsupported `spectra` format.
+        ValueError: for an unsupported `spectra` format, or if `catalog.csv`, `catalog.json`, `maps/` or a map folder
+            is a symbolic link.
     """
     project_dir = Path(project_dir)
+    if spectra not in SPECTRA_FORMATS:
+        raise ValueError(f"cannot write spectra as {spectra!r}; use one of {list(SPECTRA_FORMATS)}")
+    for catalog_file in (CATALOG_JSON, CATALOG_CSV):
+        if (project_dir / catalog_file).is_symlink():
+            raise ValueError(f"{project_dir / catalog_file} is a symbolic link; refusing to write through it")
+    found = find_sources(sources, exclude=project_dir.resolve())
     previous = _read_catalog(project_dir) if (project_dir / CATALOG_JSON).is_file() else []
     by_source = {row["source_path"]: row for row in previous}  # one row per source file, in first-seen order
-    taken = {row["name"] for row in previous}
-    for path in find_sources(sources, exclude=project_dir.resolve()):
-        row, action = _unpack_one(
-            path,
-            project_dir,
-            by_source.get(str(path)),
-            taken,
-            overwrite,
-            spectra=spectra,
-            png=png,
-            copy_source=copy_source,
-        )
-        by_source[str(path)] = row
-        taken.add(row["name"])
-        if progress:
-            progress(row, action)
-    project_dir.mkdir(parents=True, exist_ok=True)
-    _write_catalog(project_dir, list(by_source.values()))
+    by_identity = {}  # file identity -> key of by_source, so another spelling of a known path finds its row
+    for key in by_source:
+        if os.path.isfile(key):
+            by_identity[file_identity(key)] = key
+    maps_dir = project_dir / MAPS_DIR
+    on_disk = {p.name for p in maps_dir.iterdir()} if maps_dir.is_dir() else set()
+    taken = {name.casefold() for name in (*(row["name"] for row in previous), *on_disk)}
+    try:
+        for path in found:
+            identity = file_identity(path)
+            key = str(path) if str(path) in by_source else by_identity.get(identity, str(path))
+            row, action = _unpack_one(
+                path,
+                project_dir,
+                by_source.get(key),
+                taken,
+                overwrite,
+                spectra=spectra,
+                png=png,
+                copy_source=copy_source,
+            )
+            by_source[key] = row
+            by_identity[identity] = key
+            taken.add(row["name"].casefold())
+            if progress:
+                progress(row, action)
+    finally:
+        project_dir.mkdir(parents=True, exist_ok=True)
+        _write_catalog(project_dir, list(by_source.values()))
     return Project(project_dir)
 
 

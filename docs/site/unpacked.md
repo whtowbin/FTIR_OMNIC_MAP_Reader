@@ -93,7 +93,13 @@ print(same.map_kind)
 skipped (`unchanged` in the output). A source whose content changed is unpacked again into the same folder.
 `--overwrite` unpacks every map again, replacing only the files the unpacker writes. Options such as `--spectra` and
 `--png` do not apply to a map that is skipped as unchanged; use `--overwrite` to rewrite maps in another format.
-Unreadable files are tried again on every run. Files inside the project folder are never taken as sources.
+Unreadable files are tried again on every run. A map that fails while it is being written (a full disk, say) is
+listed as `skipped: cannot unpack: <error>` like an unreadable one, and the catalog is always written, even if the run
+is interrupted. A file given twice under different spellings (another case of a folder name, a symbolic link) is one
+source. Two maps whose names differ only in case (`Sample.map` and `sample.map`) get different folders, because macOS
+and Windows treat those names as the same folder; the second gets the first 8 characters of its checksum. A folder
+already in `maps/` that the catalog does not list also counts as taken. Names that Windows reserves (`CON`, `NUL`,
+`COM1` and so on) get an underscore after the first part. Files inside the project folder are never taken as sources.
 
 ## Security: shared folders
 
@@ -104,6 +110,8 @@ as untrusted:
   `ValueError`, both when reading and when clearing files before an overwrite.
 - `unpack` never writes through a symbolic link: if `maps/` or a map folder in the project is a symbolic link, it
   stops with an error instead of writing or deleting outside the project.
+- A symbolic link at `catalog.csv` or `catalog.json` is refused too (`ValueError`), so the catalog cannot be written
+  to a file outside the project.
 - When a map is overwritten, a symbolic link at one of the names the unpacker writes (such as `spectra.zarr` or
   `images`) is removed as a link and not followed. The files are then written fresh inside the map folder, so a
   shared folder cannot redirect them.
@@ -114,4 +122,8 @@ as untrusted:
   inside the store, raising `UnsafeZarrStore` (a `ValueError`). The store is then opened with `consolidated=False`, so
   the metadata that was checked is the metadata that is used. Reading a Zarr store from someone else with this package
   cannot run a pickle codec.
+- A shared `spectra.nc` is checked with h5py before it is opened (`ftir_map.unpacked.check_netcdf_file`, called by
+  `read_unpacked`). HDF5 can store a dataset in any local file (external storage, virtual datasets) or link to another
+  file, which would copy the bytes of that file into the spectra. A file that does any of these raises
+  `UnsafeNetcdfFile` (a `ValueError`). Soft and hard links inside the file are fine.
 - CSV text that a spreadsheet would run as a formula is quoted when written; see [Exports](exports.md).

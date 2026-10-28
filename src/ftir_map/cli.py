@@ -7,8 +7,8 @@ import argparse
 import sys
 from collections.abc import Sequence
 
-from .omnic import OmnicFormatError, OmnicMap, read_omnic
-from .project import Project, open_project, unpack
+from .omnic import OmnicMap, read_omnic
+from .project import UNREADABLE, Project, open_project, unpack
 from .unpacked import SPECTRA_FORMATS
 from .writers import IMAGE_FORMATS, METADATA_WRITERS, POINTS_WRITERS, SPECTRA_WRITERS, export_all
 
@@ -108,8 +108,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             m = read_omnic(args.file)
             folder = export_all(m, args.out, args.spectra, args.metadata, args.points, args.images, args.overwrite)
             print(f"wrote {folder}")
-    except (OSError, ImportError, OmnicFormatError, ValueError) as error:
-        print(f"ftir-map: {error}", file=sys.stderr)
+    except (*UNREADABLE, ImportError) as error:
+        message = str(error).replace("overwrite=True", "--overwrite")  # the CLI spelling of the Python argument
+        print(f"ftir-map: {message}", file=sys.stderr)
         return 1
     return 0
 

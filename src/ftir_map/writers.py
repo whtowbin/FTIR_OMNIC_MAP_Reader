@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import warnings
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -20,9 +21,9 @@ from .exports import (
     ImageArray,
     axis_name,
     build_metadata,
+    decode_image,
     import_optional,
     json_safe,
-    to_images,
     to_xarray,
     to_zarr,
 )
@@ -50,6 +51,14 @@ IMAGE_INDEX_COLUMNS = (
 )
 
 Columns = dict[str, list[Any]]
+# (kind, format) -> arguments of `import_optional`, so `export_all` can find a missing package before it writes anything
+OPTIONAL_PACKAGES = {
+    ("spectra", "nc"): ("h5netcdf", "netcdf", "netCDF output"),
+    ("spectra", "zarr"): ("zarr", "zarr", "to_zarr"),
+    ("metadata", "yaml"): ("yaml", "yaml", "YAML output", "PyYAML"),
+    ("points", "parquet"): ("pyarrow.parquet", "parquet", "Parquet output", "pyarrow"),
+}
+DECODE_ERRORS = (OSError, ValueError, SyntaxError, Image.DecompressionBombError)  # what Pillow raises on bad bytes
 
 
 # ------------------------------------------------------------------ shared helpers
@@ -66,16 +75,18 @@ def resolve_format(path: str | Path, format: str | None, supported: Iterable[str
 
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+_QUOTED_PREFIXES = ("'", *_FORMULA_PREFIXES)  # a text starting with one of these gets a quote in front
 
 
 def csv_cell(value: Any) -> Any:
     """One CSV field. None becomes empty; text that a spreadsheet would run as a formula gets a leading quote.
 
-    Titles and other strings come from the .map file, so they are untrusted. Numbers are written unchanged.
+    Titles and other strings come from the .map file, so they are untrusted. A text that already starts with a quote
+    gets one more, so the reader can always remove exactly one. Numbers are written unchanged.
     """
     if value is None:
         return ""
-    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+    if isinstance(value, str) and value.startswith(_QUOTED_PREFIXES):
         return "'" + value
     return value
 
@@ -257,30 +268,33 @@ def world_file_text(extent: tuple[float, float, float, float], width: int, heigh
     return "\n".join(format(value, ".12g") for value in values) + "\n"
 
 
-def _image_target(image: ImageArray, folder: Path, format: str) -> tuple[Path, str]:
+def _image_target(stage_image: StageImage, folder: Path, format: str) -> tuple[Path, str]:
     """(file path, format of the saved file: "PNG", "TIFF", "BMP" or "JPEG")."""
-    stem = folder / f"image_{image.index:02d}"
+    stem = folder / f"image_{stage_image.index:02d}"
     if format == "original":
-        return stem.with_suffix(ORIGINAL_SUFFIX[image.format]), image.format
+        return stem.with_suffix(ORIGINAL_SUFFIX[stage_image.format]), stage_image.format
     saved = format.upper()
     return stem.with_suffix(".png" if format == "png" else ".tif"), saved
 
 
-def _write_image(stage_image: StageImage, image: ImageArray, path: Path, saved_format: str) -> None:
-    if saved_format == image.format:  # "original": the embedded file, byte for byte
+def _write_image(stage_image: StageImage, decoded: ImageArray | None, path: Path, saved_format: str) -> None:
+    if decoded is None:  # "original": the embedded file, byte for byte, never decoded
         path.write_bytes(stage_image.data)
     else:
-        Image.fromarray(image.array).save(path, format=saved_format)
+        Image.fromarray(decoded.array).save(path, format=saved_format)
 
 
-def _image_record(image: ImageArray, path: Path, world_file: Path | None) -> dict[str, Any]:
-    height, width = image.array.shape[:2]
-    record: dict[str, Any] = {"file": path.name, "index": image.index, "source_format": image.format}
+def _image_record(
+    stage_image: StageImage, size: tuple[int, int], path: Path, world_file: Path | None
+) -> dict[str, Any]:
+    width, height = size
+    extent = stage_image.stage_extent
+    record: dict[str, Any] = {"file": path.name, "index": stage_image.index, "source_format": stage_image.format}
     record.update(width=width, height=height)
-    if image.extent is None:
+    if extent is None:
         record.update(xmin=None, xmax=None, ymin=None, ymax=None, pixel_size_x_um=None, pixel_size_y_um=None)
     else:
-        xmin, xmax, ymin, ymax = image.extent
+        xmin, xmax, ymin, ymax = extent
         record.update(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)
         record.update(pixel_size_x_um=(xmax - xmin) / width, pixel_size_y_um=(ymax - ymin) / height)
     record.update(world_file=world_file.name if world_file else None, orientation_verified=ORIENTATION_VERIFIED)
@@ -292,26 +306,38 @@ def save_images(m, folder: str | Path, format: str = "png") -> list[dict[str, An
 
     `format` is "png", "tiff", or "original" (the embedded BMP or JPEG bytes). A world file (.pgw, .tfw, .bpw or .jgw)
     sits next to every image that has a stage rectangle and places it in stage um. Images are decoded only in the
-    format their block declares. A map without images writes nothing. Returns the index records.
+    format their block declares. "original" does not decode at all when the file gave the image size. An image that
+    cannot be decoded is skipped with a warning (and has no record); the others are still written. A map without
+    images writes nothing. Returns the index records.
 
     Raises:
         ValueError: for an unsupported format.
     """
     format = resolve_format(folder, format, IMAGE_FORMATS)
-    images = to_images(m)
-    if not images:
+    if not m.images:
         return []
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     records = []
-    for stage_image, image in zip(m.images, images, strict=True):
-        path, saved_format = _image_target(image, folder, format)
-        _write_image(stage_image, image, path, saved_format)
+    for stage_image in m.images:
+        decoded = None
+        if format != "original" or not (stage_image.width and stage_image.height):
+            try:
+                decoded = decode_image(stage_image)
+            except DECODE_ERRORS as error:
+                warnings.warn(
+                    f"{m.path.name}: image {stage_image.index} cannot be decoded ({error}); skipped", stacklevel=2
+                )
+                continue
+        size = (decoded.array.shape[1], decoded.array.shape[0]) if decoded else (stage_image.width, stage_image.height)
+        path, saved_format = _image_target(stage_image, folder, format)
+        _write_image(stage_image, decoded, path, saved_format)
         world_file = None
-        if image.extent is not None:
+        extent = stage_image.stage_extent
+        if extent is not None:
             world_file = path.with_suffix(WORLD_SUFFIX[saved_format])
-            world_file.write_text(world_file_text(image.extent, image.array.shape[1], image.array.shape[0]))
-        records.append(_image_record(image, path, world_file))
+            world_file.write_text(world_file_text(extent, *size))
+        records.append(_image_record(stage_image, size, path, world_file))
     write_json(folder / "images.json", records)
     write_csv(
         folder / "images.csv", IMAGE_INDEX_COLUMNS, ([record[c] for c in IMAGE_INDEX_COLUMNS] for record in records)
@@ -342,8 +368,8 @@ def export_all(
     """Write spectra, per-point table, metadata and images into `folder` with a README.txt naming each file.
 
     Files: `spectra.<ext>`, `points.<ext>`, `metadata.<ext>`, `images/` (with its index and world files; left out
-    when the map has no images or `images` is "none" or None) and `README.txt`. All formats are checked before
-    anything is written.
+    when the map has no images or `images` is "none" or None) and `README.txt`. All formats and their optional
+    packages are checked before anything is written.
 
     Raises:
         FileExistsError: if `folder` exists and is not empty and `overwrite` is False.
@@ -354,6 +380,9 @@ def export_all(
     metadata_format = resolve_format("metadata", metadata, METADATA_WRITERS)
     points_format = resolve_format("points", points, POINTS_WRITERS)
     images_format = None if images in (None, "none") else resolve_format("images", images, IMAGE_FORMATS)
+    for kind, chosen in (("spectra", spectra_format), ("metadata", metadata_format), ("points", points_format)):
+        if (kind, chosen) in OPTIONAL_PACKAGES:
+            import_optional(*OPTIONAL_PACKAGES[kind, chosen])
     folder = Path(folder)
     if folder.is_dir() and any(folder.iterdir()) and not overwrite:
         raise FileExistsError(f"{folder} is not empty; pass overwrite=True to write into it")

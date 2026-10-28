@@ -82,7 +82,7 @@ def _check_v2_array(path: Path, meta: dict[str, Any]) -> None:
     filters = [f.get("id") if isinstance(f, dict) else f for f in meta.get("filters") or []]
     try:
         dtype = np.dtype(meta.get("dtype"))
-    except TypeError as error:
+    except (TypeError, ValueError) as error:
         raise UnsafeZarrStore(f"{path}: data type {meta.get('dtype')!r} is not allowed") from error
     if dtype.kind == "O":
         if filters != ["vlen-utf8"]:  # object arrays are only allowed as UTF-8 strings, never pickled objects
@@ -103,11 +103,17 @@ def _check_v3_array(path: Path, meta: dict[str, Any]) -> None:
     _check_v3_codecs(path, meta.get("codecs") or [])
 
 
-def _check_v3_codecs(path: Path, codecs: list[Any]) -> None:
+def _check_v3_codecs(path: Path, codecs: Any) -> None:
+    """Every codec must be a name or a {"name": ...} dict from the allowed list; a sharding codec is checked inside."""
+    if not isinstance(codecs, list):
+        raise UnsafeZarrStore(f"{path}: codecs {codecs!r} is not a list")
     for codec in codecs:
         name = codec.get("name") if isinstance(codec, dict) else codec
-        if name not in V3_CODECS:
+        if not isinstance(name, str) or name not in V3_CODECS:
             raise UnsafeZarrStore(f"{path}: codec {name!r} is not allowed")
         if name == "sharding_indexed":
-            config = codec.get("configuration", {})
-            _check_v3_codecs(path, config.get("codecs", []) + config.get("index_codecs", []))
+            config = codec.get("configuration") if isinstance(codec, dict) else None
+            if not isinstance(config, dict):
+                raise UnsafeZarrStore(f"{path}: sharding codec without a configuration object")
+            _check_v3_codecs(path, config.get("codecs", []))
+            _check_v3_codecs(path, config.get("index_codecs", []))

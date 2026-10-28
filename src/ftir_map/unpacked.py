@@ -30,6 +30,7 @@ from .exports import (
     build_metadata,
     dataset_to_zarr,
     import_optional,
+    json_safe,
     reader_version,
 )
 from .omnic import (
@@ -60,7 +61,7 @@ OWN_NAMES = (MAP_JSON, README, POINTS_CSV, BACKGROUNDS_CSV, IMAGES_DIR, SOURCE_D
 
 COLLECTION_FLOATS = ("first_x", "last_x", "background_gain", "laser_frequency", "spectrum_set_identifier")
 DEFINITION_FLOATS = ("step", "x_step", "y_step")
-FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")  # writers.csv_cell puts a quote in front of these
+FORMULA_PREFIXES = ("'", "=", "+", "-", "@", "\t", "\r")  # writers.csv_cell puts a quote in front of these
 # (variable, points.csv column, dtype) for the variables a map may not have
 CSV_OPTIONAL_COLUMNS = (
     ("z", "z_um", np.float64),
@@ -167,20 +168,26 @@ def _background_records(m: OmnicMap) -> list[dict[str, Any]]:
 
 
 def _image_records(m: OmnicMap, folder: Path, png: bool) -> list[dict[str, Any]]:
-    """Write the embedded images (and PNG copies if asked); return what read_unpacked needs to rebuild them."""
+    """Write the embedded images (and PNG copies if asked); return what read_unpacked needs to rebuild them.
+
+    An image that cannot be decoded is still kept as the original bytes when the file gave its size; otherwise it is
+    left out, with a warning from `save_images`.
+    """
     written = save_images(m, folder / IMAGES_DIR, "original")
     if png and written:
         save_images(m, folder / IMAGES_DIR / "png", "png")
+    files = {record["index"]: record["file"] for record in written}  # an image that could not be decoded has none
     return [
         {
             "index": s.index,
             "format": s.format,
-            "file": w["file"],
+            "file": files[s.index],
             "width": s.width,
             "height": s.height,
             "extent": s.extent,
         }
-        for s, w in zip(m.images, written, strict=True)
+        for s in m.images
+        if s.index in files
     ]
 
 
@@ -317,8 +324,8 @@ def unpack_map(
         },
         "files": {"spectra": spectra_file, "spectra_format": spectra, "points": POINTS_CSV, "images": IMAGES_DIR},
         "metadata": build_metadata(m),
-        "backgrounds": _background_records(m),
-        "images": images,
+        "backgrounds": json_safe(_background_records(m)),
+        "images": json_safe(images),
     }
     write_json(folder / MAP_JSON, content)
     return content
@@ -345,7 +352,8 @@ def _nan(value: float | None) -> float:
 
 
 def _unescape_cell(text: str) -> str:
-    """Undo the quote that `writers.csv_cell` puts before text that a spreadsheet would run as a formula."""
+    """Undo the one quote that `writers.csv_cell` puts before text that a spreadsheet would run as a formula (or that
+    starts with a quote itself)."""
     return text[1:] if text.startswith("'") and text[1:2] in FORMULA_PREFIXES else text
 
 
@@ -385,6 +393,7 @@ def _open_spectra(folder: Path, meta: dict[str, Any]) -> xr.Dataset:
         return _dataset_from_csv(folder, meta)
     if kind == "nc":
         import_optional("h5netcdf", "netcdf", "reading spectra.nc")
+        check_netcdf_file(path)  # a shared file must not pull in bytes from other files
         opened = xr.open_dataset(path, engine="h5netcdf", decode_times=False, decode_timedelta=False)
     else:
         check_zarr_store(path)  # a shared store must not name a pickle or other unsafe codec
@@ -392,6 +401,33 @@ def _open_spectra(folder: Path, meta: dict[str, Any]) -> xr.Dataset:
         opened = xr.open_dataset(path, engine="zarr", consolidated=False, decode_times=False, decode_timedelta=False)
     with opened as dataset:
         return dataset.load()
+
+
+class UnsafeNetcdfFile(ValueError):
+    """A netCDF (HDF5) file that reads bytes from outside itself: external storage, a virtual dataset or an external link."""
+
+
+def check_netcdf_file(path: Path) -> None:
+    """Raise `UnsafeNetcdfFile` if an HDF5 file at `path` points to data in another file.
+
+    HDF5 can store a dataset in any local file (external storage, virtual datasets) or link to another file, so a
+    shared spectra.nc could copy the bytes of a file such as a key or a password list into the spectra. Everything in
+    the file is checked before xarray opens it. Soft and hard links inside the file are fine.
+    """
+    h5py = import_optional("h5py", "netcdf", "reading spectra.nc")
+    with h5py.File(path, "r") as file:
+        pending, seen = [file], {hash(file.id)}
+        while pending:
+            group = pending.pop()
+            for name in group:
+                if isinstance(group.get(name, getlink=True), h5py.ExternalLink):
+                    raise UnsafeNetcdfFile(f"{path}: {group.name}/{name} is a link to another file")
+                item = group.get(name)
+                if isinstance(item, h5py.Dataset) and (item.is_virtual or item.external):
+                    raise UnsafeNetcdfFile(f"{path}: dataset {item.name} reads from another file")
+                if isinstance(item, h5py.Group) and hash(item.id) not in seen:
+                    seen.add(hash(item.id))
+                    pending.append(item)
 
 
 def _collection(values: dict[str, Any]) -> CollectionParameters:

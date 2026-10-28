@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import struct
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -57,7 +58,8 @@ AXIS_UNIT_NAMES = {"cm-1": "cm-1", "data points": "points"}  # x_units -> OmnicM
 DATA_KINDS = {17: "absorbance", 16: "transmittance", 15: "single_beam", 22: "interferogram"}
 MAP_DEFINITION_KINDS = {1: "points", 2: "line", 3: "area"}
 
-POSITION_TOLERANCE_UM = 0.5  # stage coordinates closer than this are the same row / column / line
+POSITION_TOLERANCE_UM = 0.5  # stage coordinates closer than this are the same row / column / line (at most)
+GAP_FRACTION = 0.1  # ... and never more than this fraction of the largest gap between distinct coordinates
 
 
 class OmnicFormatError(ValueError):
@@ -314,7 +316,11 @@ def read_directory(data: bytes) -> tuple[str, list[Block]]:
         raise OmnicFormatError(f"not an OMNIC container (first bytes {magic!r})")
     layout, fmt = ENTRY_FORMATS[magic]
     step = struct.calcsize(fmt)
+    if len(data) < DIRECTORY_OFFSET:
+        raise OmnicFormatError(f"file of {len(data)} bytes is shorter than its {DIRECTORY_OFFSET}-byte header")
     (n_entries,) = struct.unpack_from("<H", data, N_ENTRIES_OFFSET)
+    if DIRECTORY_OFFSET + n_entries * step > len(data):
+        raise OmnicFormatError(f"the block directory ({n_entries} entries) runs past the end of the file")
     blocks = []
     for i in range(n_entries):
         key, offset, size, index, _ = struct.unpack_from(fmt, data, DIRECTORY_OFFSET + i * step)
@@ -342,6 +348,8 @@ def _axis(header: CollectionParameters) -> np.ndarray:
 
 def parse_spectral_header(data: bytes, offset: int, acquisition: bytes = b"") -> CollectionParameters:
     """Key-2 block (140 bytes). Offsets follow PyMca's _getOmnicInfo; the units codes were checked on 81 files."""
+    if offset + SPECTRAL_HEADER_SIZE > len(data):
+        raise OmnicFormatError(f"spectral header at {offset} runs past the end of the file")
     u = struct.unpack_from("<35I", data, offset)
     f = struct.unpack_from("<31f", data, offset + 16)
     velocity = struct.unpack_from("<f", acquisition, 48)[0] if len(acquisition) >= 52 else None
@@ -386,6 +394,8 @@ def _spectra_extended(
     if not series:
         raise OmnicFormatError("no spectra block (key 0x12d): a mosaic-only or empty map")
     s = series[0]
+    if s.size < SERIES_PREFIX:
+        raise OmnicFormatError(f"spectra block of {s.size} bytes is shorter than its {SERIES_PREFIX}-byte prefix")
     header = parse_spectral_header(data, s.offset)
     if header.n_points != n_wn:
         raise OmnicFormatError(f"the spectra block has {header.n_points} points per spectrum, the file header {n_wn}")
@@ -426,10 +436,12 @@ def _backgrounds(data: bytes, blocks: list[Block]) -> list[Background]:
     header = None
     for b in blocks:
         if b.key == KEY_SPECTRAL_HEADER and b.index == 0:
-            header = parse_spectral_header(data, b.offset)
+            header = parse_spectral_header(data, b.offset) if b.size >= SPECTRAL_HEADER_SIZE else None
         elif b.key == KEY_DATA and b.index == 0 and header is not None and b.size == 4 * header.n_points:
-            spectrum = np.frombuffer(data, "<f4", header.n_points, b.offset).copy()
-            out.append(Background(spectrum, _axis(header), header.data_kind))
+            spectrum, wavenumber = np.frombuffer(data, "<f4", header.n_points, b.offset).copy(), _axis(header)
+            if header.x_units == "cm-1" and wavenumber[0] > wavenumber[-1]:  # ascending, like the map's axis
+                spectrum, wavenumber = spectrum[::-1].copy(), wavenumber[::-1].copy()
+            out.append(Background(spectrum, wavenumber, header.data_kind))
         elif b.key == KEY_BACKGROUND_TITLE and out and b.size >= 260:
             out[-1].title = _cstring(data, b.offset, 256)
             out[-1].time = OMNIC_EPOCH + _dt.timedelta(seconds=struct.unpack_from("<I", data, b.offset + 256)[0])
@@ -459,6 +471,8 @@ def _images(data: bytes, blocks: list[Block], rects: np.ndarray | None) -> list[
     chosen, fmt = (tiles, "JPEG") if tiles else (_find(blocks, KEY_VIDEO_IMAGE), "BMP")
     out = []
     for i, b in enumerate(sorted(chosen, key=lambda b: b.index)):
+        if b.size < 4:
+            raise OmnicFormatError(f"image block {b.index} of {b.size} bytes has no length field")
         (n,) = struct.unpack_from("<I", data, b.offset)
         img = bytes(data[b.offset + 4 : b.offset + 4 + min(n, b.size - 4)])
         w, h = _image_size(fmt, img)
@@ -517,11 +531,18 @@ def _clusters(v: np.ndarray, tol: float) -> np.ndarray:
     return rank
 
 
+def _axis_tolerance(v: np.ndarray, tol: float) -> float:
+    """tol, lowered to GAP_FRACTION of the largest gap between distinct values so that a grid with a step finer than
+    tol is not merged into one row or column. A jittered grid keeps tol: its largest gap is about one step."""
+    gaps = np.diff(np.unique(v))
+    return min(tol, GAP_FRACTION * float(gaps.max())) if len(gaps) else tol
+
+
 def grid_layout(x: np.ndarray, y: np.ndarray, tol: float = POSITION_TOLERANCE_UM):
     """((n_rows, n_columns), (row, column)) when every grid cell holds exactly one point, else None."""
     if len(x) < 4 or not (np.isfinite(x).all() and np.isfinite(y).all()):
         return None
-    col, row = _clusters(x, tol), _clusters(y, tol)
+    col, row = _clusters(x, _axis_tolerance(x, tol)), _clusters(y, _axis_tolerance(y, tol))
     shape = (int(row.max()) + 1, int(col.max()) + 1)
     if shape[0] < 2 or shape[1] < 2 or shape[0] * shape[1] != len(x):
         return None
@@ -555,31 +576,54 @@ def classify(x, y, titles, definition: MapDefinition | None):
     return "points", None
 
 
+def _matching(by_index: dict, key: tuple[int, int], n: int, what: str) -> np.ndarray | None:
+    """The key-6 array stored under `key` when it holds one entry per spectrum. A different length is not guessed
+    at (no truncating or padding): the array is dropped with a warning."""
+    a = by_index.get(key)
+    if a is None or len(a) == n:
+        return a
+    note = " (the stored count is a 16-bit field, so it wraps above 65535 spectra)" if n > 0xFFFF else ""
+    warnings.warn(f"the file stores {len(a)} {what} for {n} spectra{note}; they are ignored", stacklevel=2)
+    return None
+
+
 def _positions(point_arrays, n: int):
     """(x, y, z, background_index) from the key-6 blocks. Index 1 holds one (x, y) pair per spectrum. Index 3 holds,
     per spectrum, the number of the background it was ratioed against (its maximum is the number of backgrounds
     minus one in every test file). Index 4, written by the classic layout only, holds the stage Z."""
-    by_index = {(index, kind): a for (index, kind, a) in point_arrays if len(a) == n}
-    xy = by_index.get((1, POINT_XY))
+    by_index = {(index, kind): a for (index, kind, a) in point_arrays}
+    xy = _matching(by_index, (1, POINT_XY), n, "stage positions")
     x, y = (xy[:, 0], xy[:, 1]) if xy is not None else (np.full(n, np.nan), np.full(n, np.nan))
-    bkg = by_index.get((3, POINT_SCALAR))
-    z = by_index.get((4, POINT_SCALAR))
+    bkg = _matching(by_index, (3, POINT_SCALAR), n, "background indices")
+    z = _matching(by_index, (4, POINT_SCALAR), n, "stage Z values")
     return x, y, (z[:, 0] if z is not None else None), (bkg[:, 0].astype(np.int64) if bkg is not None else None)
 
 
 # ------------------------------------------------------------------ entry point
 def read_omnic(path) -> OmnicMap:
-    """Read an OMNIC .map file. Raises OmnicFormatError on files that are not OMNIC maps or hold no spectra."""
+    """Read an OMNIC .map file. Raises OmnicFormatError on files that are not OMNIC maps, hold no spectra or are
+    malformed (truncated or inconsistent blocks)."""
     path = Path(path)
     data = path.read_bytes()
+    try:
+        return _read(path, data)
+    except (struct.error, IndexError) as error:  # a size check missed a malformed block
+        raise OmnicFormatError(f"{path.name}: malformed file ({error})") from error
+
+
+def _read(path: Path, data: bytes) -> OmnicMap:
     layout, blocks = read_directory(data)
     main = _find(blocks, KEY_SPECTRAL_HEADER, 1) or _find(blocks, KEY_SPECTRAL_HEADER)
     if not main:
         raise OmnicFormatError(f"{path.name}: no spectral header (key 2)")
     acq = _find(blocks, KEY_ACQUISITION, 1)
     acquisition = bytes(data[acq[0].offset : acq[0].offset + acq[0].size]) if acq else b""
+    if main[0].size < SPECTRAL_HEADER_SIZE:
+        raise OmnicFormatError(f"{path.name}: the spectral header block has {main[0].size} bytes, expected 140")
     collection = parse_spectral_header(data, main[0].offset, acquisition)
     n_wn = collection.n_points
+    if n_wn < 1:
+        raise OmnicFormatError(f"{path.name}: the spectral header says {n_wn} points per spectrum")
     try:
         if layout == "extended":
             spectra, heads, series_header = _spectra_extended(data, blocks, n_wn)

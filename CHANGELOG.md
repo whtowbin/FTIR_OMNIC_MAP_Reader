@@ -12,6 +12,43 @@
 - Documentation and NOTICE credit PyMca fully: "How this reader was made" describes how the reader was built on
   PyMca's OmnicMap.py, whose constants were the key to the file format. PyMca links point to silx-kit/pymca.
 
+### Fixed
+
+- `read_omnic` raises `OmnicFormatError`, not `struct.error`, `IndexError` or a NumPy error, on truncated files, short
+  header blocks, image blocks without a length field and headers with 0 points; `Load_Omnic_Map` warns and returns
+  `None` for them, as in 1.0.
+- A key-6 position or background-index array whose length differs from the number of spectra now gives a warning
+  with both counts (it used to leave NaN positions silently). This includes maps of more than 65535 spectra, whose
+  16-bit count wraps.
+- Grids with a step finer than 0.5 um are recognized as grids, not lines: the row and column tolerance is at most a
+  tenth of the largest coordinate gap.
+- Backgrounds of a map stored with a descending cm-1 axis are reversed to ascending, like the spectra.
+- `Load_Omnic_Map` on a per-point map replaces NaN by 0, like the grid path. On both paths the units follow the file
+  (`points` and `interferogram` for an interferogram map, not `cm^-1` and `absorbance`); every real grid map tested
+  is absorbance in cm-1, so their labels do not change.
+- `unpack`: maps whose names differ only in case (`Sample.map`, `sample.map`) get different folders; before, one
+  overwrote the other on macOS and Windows and a re-run said "unchanged". A folder already in `maps/` that the catalog
+  does not list is never reused.
+- `unpack`: a map that fails while it is written (for example an image that cannot be decoded) is a skipped row with
+  the error, not an abort; an error from the system (disk full, permissions) still stops the run. `catalog.json` and
+  `catalog.csv` are always written. `save_images` writes the original
+  images without decoding them when the file gave their size, and skips an image it cannot decode with a warning.
+- `to_zarr(mode="w")` and `save_spectra(..., "zarr")` refuse an ordinary folder that holds files instead of deleting
+  its content.
+- `unpack` refuses a symbolic link at `catalog.csv` or `catalog.json`.
+- `read_unpacked` checks a `spectra.nc` with h5py and raises `UnsafeNetcdfFile` for HDF5 external storage, virtual
+  datasets and external links.
+- `ftir-map info` on a truncated file prints one line on stderr and exits 1; a malformed sharding codec in a Zarr
+  store raises `UnsafeZarrStore`, not `AttributeError`.
+- `export_all` checks the optional packages of every chosen format before it writes anything; the CLI error says
+  `--overwrite`.
+- A CSV title that starts with an apostrophe followed by a formula character (`'=x`) is read back unchanged: text
+  starting with `'` is quoted too, and the reader removes exactly one quote.
+- The same map given under another spelling of its path (case, symbolic link) is one source, not two.
+- `images` and `backgrounds` in `map.json` pass through `json_safe` (NaN is `null`); map names that Windows reserves
+  (`CON`, `NUL`, `COM1`, ...) get an underscore.
+- map_kinds.md: an `array` map has no `grid_shape` when its pixels do not fill a grid.
+
 ## 1.1.0 (2026-10-22)
 
 ### Added

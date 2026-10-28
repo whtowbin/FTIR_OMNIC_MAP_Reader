@@ -102,3 +102,38 @@ def test_metadata_names_spelled_in_another_case_are_refused(tmp_path, name):
     (store / "arr" / name).write_text(json.dumps(meta))  # on macOS zarr would read this as .zarray / zarr.json
     with pytest.raises(UnsafeZarrStore, match="not spelled"):
         check_zarr_store(store)
+
+
+@pytest.mark.parametrize(
+    "codecs",
+    [
+        ["sharding_indexed"],
+        [{"name": "sharding_indexed", "configuration": None}],
+        [{"name": "sharding_indexed", "configuration": {"codecs": {"name": "bytes"}}}],
+        [{"name": "sharding_indexed", "configuration": {"codecs": [{"name": "bytes"}], "index_codecs": "crc32c"}}],
+        {"name": "bytes"},
+        [["bytes"]],
+        [{"name": ["bytes"]}],
+    ],
+)
+def test_malformed_codec_structures_raise_unsafe_store(tmp_path, codecs):
+    with pytest.raises(UnsafeZarrStore):
+        check_zarr_store(v3_store(tmp_path, codecs=codecs))
+
+
+def test_a_well_formed_sharding_codec_is_allowed(tmp_path):
+    config = {"codecs": [{"name": "bytes"}], "index_codecs": [{"name": "bytes"}, {"name": "crc32c"}]}
+    check_zarr_store(v3_store(tmp_path, codecs=[{"name": "sharding_indexed", "configuration": config}]))
+
+
+def test_consolidated_metadata_is_never_used(tmp_path):
+    """check_zarr_store reads the per-array metadata, so the store is opened with consolidated=False."""
+    folder = tmp_path / "u"
+    grid_map(tmp_path).unpack(folder)
+    root_meta = folder / "spectra.zarr" / "zarr.json"
+    content = json.loads(root_meta.read_text())
+    consolidated = content["consolidated_metadata"]["metadata"]["spectra"]
+    consolidated["codecs"].append({"name": "numcodecs.pickle"})
+    root_meta.write_text(json.dumps(content))
+    check_zarr_store(folder / "spectra.zarr")  # the per-array metadata is still safe
+    assert read_unpacked(folder).spectra.shape[0] == 6  # tampered consolidated copy is ignored

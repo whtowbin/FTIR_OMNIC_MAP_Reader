@@ -56,7 +56,8 @@ collection:
 ## `ftir-map export`
 
 Reads one map and writes a folder with `export_all`: the spectra, a points table, the metadata and the images, with a
-`README.txt` naming each file. It refuses to write into a folder that is not empty unless `--overwrite` is given. See
+`README.txt` naming each file. It refuses to write into a folder that is not empty unless `--overwrite` is given. Every error (an unreadable or truncated
+map, a missing optional package, a folder that is not empty) is one line on stderr and exit status 1, with no traceback. See
 [Exports](exports.md#export_allfolder-spectrazarr-metadatajson-pointscsv-imagespng-overwritefalse) for the folder.
 
 ```console

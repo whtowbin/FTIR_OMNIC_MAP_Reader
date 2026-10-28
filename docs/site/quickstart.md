@@ -73,7 +73,8 @@ This is a quick look, not a quantitative baseline-corrected integration. For a l
 from pathlib import Path
 
 folder = m.export_all("my_map_export")  # raises FileExistsError if the folder exists and is not empty
-print(sorted(path.name for path in folder.iterdir()))  # ['README.txt', 'images', 'metadata.json', 'points.csv', 'spectra.zarr']
+# ['README.txt', 'images', 'metadata.json', 'points.csv', 'spectra.zarr']
+print(sorted(path.name for path in folder.iterdir()))
 ```
 
 `export_all` writes the spectra as Zarr (the default), the per-spectrum table as CSV, the metadata as JSON and the

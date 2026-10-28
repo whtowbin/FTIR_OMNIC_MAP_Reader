@@ -36,7 +36,9 @@ my_map/
 | `backgrounds` | One record per background, in order: `title`, `time`, `data_kind`, `wavenumber_first`, `wavenumber_last`. The spectra are in the spectra file. |
 | `images` | One record per image: `index`, `format` (`BMP` or `JPEG`), `file`, `width`, `height`, `extent` (x0, y0, x1, y1 as stored, stage um, or null). |
 
-Numbers that are NaN or infinite in the source are `null` in JSON.
+Numbers that are NaN or infinite in the source are `null` in JSON, including those in `backgrounds` and `images`. An image
+that cannot be decoded is kept as its original bytes when the file gave its size (the image block's `width` and
+`height`), so `images/` always holds the original files; a PNG copy of it is skipped with a warning.
 
 ### spectra.zarr
 
@@ -134,7 +136,7 @@ of rows. `catalog.csv` has the same rows with these columns:
 | `x_min`, `x_max`, `y_min`, `y_max` | Stage extent of the spectra in um. |
 | `n_images` | Embedded images. |
 | `file_time` | Time stored in the .map file. |
-| `status` | `ok`, or `skipped: <reason>` for a file that cannot be read (for example a mosaic-only map). |
+| `status` | `ok`, or `skipped: <reason>` for a file that cannot be read (for example a mosaic-only map) or whose unpacking failed (`skipped: cannot unpack: <error>`). |
 
 ### Re-running
 
