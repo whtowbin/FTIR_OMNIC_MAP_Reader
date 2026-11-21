@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from ftir_map import read_omnic
 from ftir_map.LoadOmnicMAP import Load_Omnic_Map
 
 from .omnic_writer import write_map
@@ -69,12 +70,53 @@ def test_point_and_line_maps_are_returned_per_point(tmp_path, layout, positions)
     np.testing.assert_array_equal(ds["spectra"].values, spectra(len(positions)))
     p = as_stored(positions)
     np.testing.assert_array_equal(ds["x_stage"].values, p[:, 0])
-    np.testing.assert_allclose(ds["y"].values, p[:, 1] - p[0, 1])
+    np.testing.assert_array_equal(ds["y_stage"].values, p[:, 1])
+    np.testing.assert_array_equal(ds["x"].values, p[:, 0] - p[0, 0])  # relative to the first point (migrating.md)
+    np.testing.assert_array_equal(ds["y"].values, p[:, 1] - p[0, 1])
     d = load_dict(path)
+    # docs/site/migrating.md: keys data, x, y, wn, metadata, plus x_stage and y_stage for per-point maps
+    assert set(d) == {"data", "x", "y", "wn", "metadata", "x_stage", "y_stage"}
     assert d["data"].shape == (len(positions), N_WN)
+    np.testing.assert_array_equal(d["x"], p[:, 0] - p[0, 0])
+    np.testing.assert_array_equal(d["x_stage"], p[:, 0])
     np.testing.assert_array_equal(d["y_stage"], p[:, 1])
+    np.testing.assert_array_equal(d["wn"], np.linspace(650.0, 4000.0, N_WN))
     array = Load_Omnic_Map(str(path), format="Xarray-DataArray")
     assert isinstance(array, xr.DataArray) and array.dims == ("point", "wn")
+
+
+@pytest.mark.parametrize("layout", ["classic", "extended"])
+def test_grid_dictionary_has_the_documented_keys_and_legacy_calibration(tmp_path, layout):
+    path = tmp_path / "grid.map"
+    write_map(path, spectra(6), GRID, layout=layout, kind="area")
+    d = load_dict(path)
+    assert set(d) == {"data", "x", "y", "wn", "metadata"}  # no x_stage / y_stage on a grid
+    np.testing.assert_array_equal(d["x"], [0.0, 25.0, 50.0])
+    np.testing.assert_array_equal(d["wn"], np.linspace(650.0, 4000.0, N_WN))
+    meta = d["metadata"]
+    # worked by hand from the header (650 to 4000 cm-1, 37 points) and from GRID (3 columns 25 um apart, 2 rows 50)
+    assert meta["McaCalib"] == [650.0, 3350.0 / 36, 0.0]  # [first X, data spacing, 0]
+    assert meta["xScale"] == [100.0, (150.0 - 100.0) / (3 - 1)]  # [x of the first column, dx]
+    assert meta["yScale"] == [200.0, (250.0 - 200.0) / (2 - 1)]
+    assert (meta["Dim_1"], meta["Dim_2"], meta["Dim_3"]) == (2, 3, N_WN)  # rows, columns, points per spectrum
+    np.testing.assert_array_equal(meta["positioners"]["X"], as_stored(GRID)[:, 0])
+    np.testing.assert_array_equal(meta["positioners"]["Y"], as_stored(GRID)[:, 1])
+
+
+@pytest.mark.parametrize(
+    "positions",
+    [
+        [[100.0 + 25.0 * (i % 3), 250.0 - 50.0 * (i // 3)] for i in range(6)],  # x rises, y falls
+        [[150.0 - 25.0 * (i % 3), 200.0 + 50.0 * (i // 3)] for i in range(6)],  # x falls, y rises
+    ],
+    ids=["rows from the top", "columns from the right"],
+)
+def test_scales_are_only_given_when_both_axes_rise(tmp_path, positions):
+    """x and y scales are written together or not at all (PyMca wrote them for rising axes only)."""
+    path = tmp_path / "grid.map"
+    write_map(path, spectra(6), positions, kind="area")
+    meta = load_dataset(path).attrs
+    assert "xScale" not in meta and "yScale" not in meta  # one axis falling is enough to drop both
 
 
 def test_unsupported_format(tmp_path):
@@ -85,7 +127,15 @@ def test_unsupported_format(tmp_path):
 def test_real_array_detector_map():
     d = load_dict(real(ARRAY_MAP.name))
     assert d["data"].shape == (43, 31, 853)
-    assert d["x"][-1] == pytest.approx(750.0, abs=0.01) and d["y"][-1] == pytest.approx(1050.0, abs=0.01)
+    # x and y run from the first to the last column and row center of the map definition (float64): 750 and 1050 um.
+    # The stored float32 positions near 2e3 um (half spacing 1.2e-4 um each) differ from them by up to 1.5e-4 um
+    # (measured 0 and 1.2e-4).
+    definition = read_omnic(real(ARRAY_MAP.name)).map_definition
+    assert definition is not None
+    x_range, y_range = definition.x_range, definition.y_range
+    assert d["x"][0] == d["y"][0] == 0.0
+    assert d["x"][-1] == pytest.approx(x_range[1] - x_range[0], abs=1.5e-4)
+    assert d["y"][-1] == pytest.approx(y_range[1] - y_range[0], abs=1.5e-4)
 
 
 def test_unreadable_files_warn_and_return_none(tmp_path):
@@ -145,23 +195,26 @@ def assert_same(a, b, where="attrs", atol=0.0):
 
 
 # Array-detector maps: version 1.0 read the stage position from the two-decimal text in each spectrum title, this
-# version from the float32 values stored in the file. They differ by up to 0.003 um (the titles are rounded).
+# version from the float32 values stored in the file. The titles are rounded to 0.005 um and the stored float32
+# values near 2e3 um to 1.2e-4 um, so absolute positions differ by up to 0.0052 um (measured 0.0026). The relative
+# coordinates x and y differ by up to 1.5e-4 um (measured 1.2e-4: float32 spacing near 2e3 um). On the ultrafast grid
+# both versions read the same float32 values: the comparison is exact (measured 0).
 POSITION_KEYS = ("xScale", "yScale", "positioners")
 
 
 @pytest.mark.parametrize(
-    ("name", "position_atol"),
-    [("GCB_1C_ol54_ultrafast map_75um aperture and step.map", 0.0), (ARRAY_MAP.name, 0.01)],
+    ("name", "position_atol", "coord_atol"),
+    [("GCB_1C_ol54_ultrafast map_75um aperture and step.map", 0.0, 0.0), (ARRAY_MAP.name, 0.0052, 1.5e-4)],
     ids=["extended-grid", "array-detector"],
 )
-def test_grid_output_is_identical_to_version_1_0(name, position_atol):
+def test_grid_output_is_identical_to_version_1_0(name, position_atol, coord_atol):
     path = str(real(name))
     old, new = legacy_load(path), load_dataset(path)
     assert old["spectra"].dims == new["spectra"].dims and new["spectra"].dtype == old["spectra"].dtype
     np.testing.assert_array_equal(old["spectra"].values, new["spectra"].values)  # bit for bit
     np.testing.assert_array_equal(old["wn"].values, new["wn"].values)
     for coord in ("x", "y"):
-        np.testing.assert_allclose(old[coord].values, new[coord].values, rtol=0, atol=max(position_atol, 1e-9))
+        np.testing.assert_allclose(old[coord].values, new[coord].values, rtol=0, atol=coord_atol)
     others = [k for k in old.attrs if k not in POSITION_KEYS]
     assert_same({k: old.attrs[k] for k in others}, {k: new.attrs[k] for k in others})
     assert_same({k: old.attrs[k] for k in POSITION_KEYS}, {k: new.attrs[k] for k in POSITION_KEYS}, atol=position_atol)

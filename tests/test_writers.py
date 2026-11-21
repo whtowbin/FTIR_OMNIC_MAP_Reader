@@ -14,7 +14,7 @@ from ftir_map import read_omnic, read_unpacked
 from ftir_map.exports import build_metadata
 from ftir_map.writers import csv_cell, flatten_metadata, points_table, world_file_text
 
-from .omnic_writer import marker_bmp
+from .omnic_writer import marker_bmp, write_map
 from .test_exports import REAL_MAPS, grid_map, point_map
 from .test_omnic import DATA
 
@@ -116,7 +116,7 @@ def test_points_json_records_and_parquet_agree(synthetic, tmp_path):
     synthetic.save_points(tmp_path / "points.json")
     records = json.loads((tmp_path / "points.json").read_text(encoding="utf-8"))
     assert len(records) == synthetic.n_points and records[1]["index"] == 1
-    assert records[1]["x_um"] == pytest.approx(float(synthetic.x[1]))
+    assert records[1]["x_um"] == float(synthetic.x[1])  # JSON writes the shortest repr of the float64: exact
     parquet = pytest.importorskip("pyarrow.parquet")
     synthetic.save_points(tmp_path / "points.parquet")
     assert parquet.read_table(tmp_path / "points.parquet").to_pylist() == records
@@ -134,7 +134,8 @@ def test_spectra_csv_round_trip(synthetic, tmp_path):
     header = read_csv(tmp_path / "spectra.csv")[0]
     assert header == ["wavenumber_cm-1", *map(str, range(synthetic.n_points))]
     table = np.loadtxt(tmp_path / "spectra.csv", delimiter=",", skiprows=1)
-    np.testing.assert_allclose(table[:, 0], synthetic.axis, rtol=1e-8)
+    # the axis is float64 written with nine significant digits (exports.md): relative error at most 5e-9
+    np.testing.assert_allclose(table[:, 0], synthetic.axis, rtol=5e-9)
     np.testing.assert_array_equal(table[:, 1:].T.astype(np.float32), synthetic.spectra)
 
 
@@ -146,7 +147,13 @@ def test_spectra_npz_round_trip(synthetic, tmp_path):
         np.testing.assert_array_equal(npz["x"], synthetic.x)
         np.testing.assert_array_equal(npz["y"], synthetic.y)
         assert ("z" in npz.files) == (synthetic.z is not None)
+        if synthetic.z is not None:
+            np.testing.assert_array_equal(npz["z"], synthetic.z)
         assert ("grid_index" in npz.files) == (synthetic.grid_index is not None)
+        if synthetic.grid_index is not None:
+            np.testing.assert_array_equal(
+                npz["grid_index"], np.column_stack(synthetic.grid_index)
+            )  # (n, 2): row, column
         assert json.loads(str(npz["metadata"])) == build_metadata(synthetic)
 
 
@@ -231,9 +238,10 @@ def test_real_mosaic_images_original_and_png(tmp_path):
     assert all((tmp_path / "jpg" / r["file"]).read_bytes() == s.data for r, s in zip(records, m.images, strict=True))
     for record in records:
         world = [float(v) for v in (tmp_path / "jpg" / record["world_file"]).read_text().split()]
-        assert world[4] == pytest.approx(record["xmin"] + record["pixel_size_x_um"] / 2)
-        assert world[5] == pytest.approx(record["ymax"] - record["pixel_size_y_um"] / 2)
-        assert world[0] * record["width"] == pytest.approx(record["xmax"] - record["xmin"])
+        # a world file has 12 significant digits, so each number is off by at most 5e-12 relative
+        assert world[4] == pytest.approx(record["xmin"] + record["pixel_size_x_um"] / 2, rel=5e-12)
+        assert world[5] == pytest.approx(record["ymax"] - record["pixel_size_y_um"] / 2, rel=5e-12)
+        assert world[0] * record["width"] == pytest.approx(record["xmax"] - record["xmin"], rel=5e-12)
     m.save_images(tmp_path / "png", "png")
     with Image.open(tmp_path / "png" / "image_01.png") as first:
         assert first.size == (878, 686)
@@ -298,7 +306,11 @@ def test_real_maps_export_all(tmp_path, name):
     pytest.importorskip("h5netcdf")
     m = real_map(name)
     folder = m.export_all(tmp_path / "out", spectra="nc", metadata="csv", points="json")
-    assert (folder / "spectra.nc").stat().st_size > 0
+    with xr.open_dataset(folder / "spectra.nc", engine="h5netcdf") as back:
+        expected = m.to_xarray()
+        np.testing.assert_array_equal(back["spectra"].values, expected["spectra"].values)  # NaN equals NaN
+        assert back["spectra"].dims == expected["spectra"].dims
+        assert json.loads(back.attrs["metadata_json"]) == build_metadata(m)
     assert len(json.loads((folder / "points.json").read_text())) == m.n_points
     assert (folder / "images").exists() == bool(m.images)
     m.save_spectra(tmp_path / "s.npz")
@@ -328,9 +340,10 @@ def test_cli_info_on_a_real_map():
         pytest.skip("map not in tests/data")
     result = run_cli("info", str(path))
     assert result.returncode == 0, result.stderr
-    assert "map kind: grid (13 rows x 11 columns)" in result.stdout
-    assert "points: 143" in result.stdout and "images: 6" in result.stdout
-    assert "n_sample_scans:" in result.stdout
+    lines = result.stdout.splitlines()  # whole lines, so "points: 1430" or "images: 60" would not match
+    assert "map kind: grid (13 rows x 11 columns)" in lines
+    assert "points: 143" in lines and "images: 6" in lines
+    assert "  n_sample_scans: 1" in lines  # golden value: this one-scan map, from a reviewed `ftir-map info` run
 
 
 def test_cli_export_on_a_real_map(tmp_path):
@@ -350,6 +363,12 @@ def test_cli_export_on_a_real_map(tmp_path):
         "spectra.npz",
     ]
     assert (out / "images" / "image_01.tfw").exists()
+    m = read_omnic(path)
+    with np.load(out / "spectra.npz") as npz:  # the exported content is the map's, not just files with the right names
+        assert npz["spectra"].shape == (m.n_points, len(m.axis))
+        np.testing.assert_array_equal(npz["spectra"], m.spectra)
+        np.testing.assert_array_equal(npz["axis"], m.axis)
+    assert len(read_csv(out / "points.csv")) == m.n_points + 1
     again = run_cli("export", str(path), "--out", str(out))
     assert again.returncode == 1 and "--overwrite" in again.stderr
     assert run_cli("export", str(path), "--out", str(out), "--spectra", "npz", "--overwrite").returncode == 0
@@ -460,3 +479,99 @@ def test_to_zarr_mode_w_refuses_an_ordinary_folder_with_files(tmp_path):
     with pytest.raises(FileExistsError, match="not a Zarr store"):
         grid_map(tmp_path).to_zarr(folder, mode="w")
     assert (folder / "important.txt").exists()
+
+
+# ------------------------------------------------------------------ number formats (docs/site/exports.md)
+def test_spectra_csv_numbers_have_nine_significant_digits(tmp_path):
+    # oracle by hand: float32(0.1) = 0.100000001490116, float32(1/3) = 0.333333343267441, float32(1e-5) =
+    # 9.99999974737875e-06; each rounded to nine significant digits. 1e10 and 2.5 are exact in float32.
+    path = tmp_path / "m.map"
+    write_map(path, [[0.1, 1 / 3, 1e10], [2.5, 1e-5, 3.0]], [[0.0, 0.0], [10.0, 0.0]])
+    read_omnic(path).save_spectra(tmp_path / "spectra.csv")
+    assert (tmp_path / "spectra.csv").read_text().splitlines() == [
+        "wavenumber_cm-1,0,1",
+        "650,0.100000001,2.5",
+        "2325,0.333333343,9.99999975e-06",
+        "4000,1e+10,3",
+    ]
+
+
+def test_world_file_numbers_have_twelve_significant_digits():
+    # oracle by hand: x pixel 1/3 and centre 1/6; y pixel 1/7 and upper-left centre 1 - 1/14 = 13/14
+    text = world_file_text((0.0, 1.0, 0.0, 1.0), width=3, height=7)
+    assert text.splitlines() == ["0.333333333333", "0", "0", "-0.142857142857", "0.166666666667", "0.928571428571"]
+
+
+# ------------------------------------------------------------------ images.json
+IMAGE_KEYS = [
+    "file",
+    "index",
+    "source_format",
+    "width",
+    "height",
+    "xmin",
+    "xmax",
+    "ymin",
+    "ymax",
+    "pixel_size_x_um",
+    "pixel_size_y_um",
+    "world_file",
+    "orientation_verified",
+]  # the columns of the images.csv example in docs/site/exports.md
+
+
+def test_image_records_carry_every_documented_key(tmp_path):
+    m = point_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+    (record,) = m.save_images(tmp_path / "out")
+    assert list(record) == IMAGE_KEYS
+    assert json.loads((tmp_path / "out" / "images.json").read_text()) == [record]
+
+
+def test_image_without_a_stage_extent_has_none_for_position_and_world_file(tmp_path):
+    m = point_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+    m.images[0].extent = None
+    (record,) = m.save_images(tmp_path / "out")
+    assert list(record) == IMAGE_KEYS
+    assert [record[key] for key in ("xmin", "xmax", "ymin", "ymax", "pixel_size_x_um", "pixel_size_y_um")] == [None] * 6
+    assert record["world_file"] is None and record["file"] == "image_01.png"
+    assert [p.name for p in (tmp_path / "out").iterdir() if p.suffix == ".pgw"] == []  # no world file written
+    rows = read_csv(tmp_path / "out" / "images.csv")
+    assert rows[1] == ["image_01.png", "1", "BMP", "4", "3", "", "", "", "", "", "", "", "True"]
+
+
+# ------------------------------------------------------------------ folders and the format argument
+def test_save_images_creates_missing_parents_and_reuses_an_existing_folder(tmp_path):
+    m = point_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+    folder = tmp_path / "a" / "b" / "images"  # neither a nor b exists
+    m.save_images(folder)
+    assert (folder / "image_01.png").exists()
+    m.save_images(folder)  # the folder exists now: written again, not an error
+    assert (folder / "image_01.png").exists()
+
+
+def test_export_all_creates_missing_parents_and_overwrites_into_an_existing_folder(tmp_path):
+    m = point_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+    folder = tmp_path / "a" / "b" / "out"
+    assert m.export_all(folder, spectra="csv") == folder
+    assert (folder / "spectra.csv").exists() and (folder / "images" / "image_01.png").exists()
+    m.export_all(folder, spectra="npz", overwrite=True)  # the folder and its images folder exist and are not empty
+    assert (folder / "spectra.npz").exists() and (folder / "spectra.csv").exists()  # files not written again are kept
+
+
+def test_the_omnicmap_methods_pass_the_format_through(tmp_path):
+    # every file below has a name that says nothing, so only the `format` argument can pick the writer
+    pytest.importorskip("pyarrow")
+    m = grid_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+    m.save_points(tmp_path / "points.dat", "parquet")
+    assert (tmp_path / "points.dat").read_bytes().startswith(b"PAR1")  # the Parquet magic number
+    m.save_spectra(tmp_path / "spectra.dat", "npz")
+    with np.load(tmp_path / "spectra.dat") as npz:
+        np.testing.assert_array_equal(npz["spectra"], m.spectra)
+    m.save_metadata(tmp_path / "metadata.dat", "csv")
+    assert read_csv(tmp_path / "metadata.dat")[0] == ["key", "value"]
+    m.save_images(tmp_path / "tiff", "tiff")
+    assert (tmp_path / "tiff" / "image_01.tif").exists() and (tmp_path / "tiff" / "image_01.tfw").exists()
+    m.export_all(tmp_path / "out", spectra="npz", metadata="csv", points="parquet", images="tiff")
+    assert (tmp_path / "out" / "points.parquet").read_bytes().startswith(b"PAR1")
+    assert (tmp_path / "out" / "images" / "image_01.tfw").exists()
+    assert read_csv(tmp_path / "out" / "metadata.csv")[0] == ["key", "value"]

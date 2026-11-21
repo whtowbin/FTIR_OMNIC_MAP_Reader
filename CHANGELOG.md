@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `read_unpacked` gave back the wavenumbers of backgrounds of a map with a descending cm-1 axis off by up to 4.5e-13;
+  they now come back bit for bit, as `unpacked.md` says.
+- `read_unpacked` and `open_project` raise `OmnicFormatError`, with every problem found in one message, for a damaged
+  `map.json` or `catalog.json` (not JSON, a missing key, an `n_points` or `backgrounds` that does not match the spectra
+  file, a `points.csv` with a row missing) instead of a raw `KeyError`, `AttributeError`, `IndexError` or `ValueError`,
+  or no error at all. `ftir-map catalog` and `ftir-map unpack` print one line for a damaged catalog, not a traceback.
+- `check_zarr_store` refuses a `sharding_indexed` codec without its `codecs` or `index_codecs` list (both required by
+  the Zarr v3 spec); it used to read a missing list as empty and accept the store.
+- `file_format.md`: the file time (0x128) is not the last background time on the extended maps (1 s, 51 s and 4 min
+  21 s later in the three test files), and the number of sample scans (+36) is "consistent", not "verified": the
+  interferogram map named "256 averages" stores 8. The point list in block 0x82 now has its offsets.
+
+### Tests
+
+- The command-line tests run `info`, `catalog`, `unpack` and `export` on the real test maps in-process and check the
+  printed numbers, and the parser's defaults and choices against `cli.md`. Tests for damaged `map.json` and
+  `catalog.json` files, for the folder names of maps with the same file name, for the checksum and size in `map.json`,
+  and for the absence of `png/` and `source/` in a default unpack.
+- Property tests with Hypothesis (`tests/test_properties.py`; 50 examples per property by default, 200 with
+  `HYPOTHESIS_PROFILE=ci`): writer to reader to unpacked folder is bit-exact, `grid_layout` on any acquisition order,
+  `csv_cell` and world-file inverses, and Zarr equals `to_xarray`.
+- The writer tests check nested and existing output folders, the NPZ `z` and `grid_index` values, the CSV and world-file
+  number formats, every key of `images.json`, the `format` argument of the `OmnicMap` methods, and the content of the
+  CLI and netCDF exports of real maps. Tolerances now follow the documented digits.
+- The synthetic writer gives every spectral-header, map-definition and map-description field its own value, and the
+  tests decode each one from its offset (sample and background scans were both 16). `omnic.py` has tests for unsigned
+  fields above 2**31, files cut by one byte at each size bound, 256-byte text fields, image sizes against Pillow, and
+  the grid and line thresholds. Real-file checks use independent sources: background times against their date titles,
+  the interferogram times against its date titles, the point list in block 0x82, the map definition and file names.
+  Tolerances now follow the stated digits (7 significant digits of OMNIC's CSV, float32 rounding, 2-decimal titles).
+- Tests for `to_xarray` dimensions, `units` attributes and `background_title`, the backgrounds of descending axes,
+  both Zarr formats in `mode="w"`, the keys and calibration of `Load_Omnic_Map`, and the refusals of `check_zarr_store`
+  (complex and structured dtypes, filters, compressors, unreadable and non-object metadata).
+
 ## 1.1.1 (2026-10-28)
 
 ### Added

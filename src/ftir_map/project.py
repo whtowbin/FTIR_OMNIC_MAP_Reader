@@ -14,7 +14,7 @@ import re
 import struct
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import numpy as np
 
@@ -290,13 +290,80 @@ def unpack(
 
 
 # ------------------------------------------------------------------ opening a project
+def _is_int(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _unpacked_row_problems(where: str, row: Row) -> list[str]:
+    """The text and numbers that the readers use from the row of a map that was unpacked."""
+    problems = [
+        f"{where} {column!r} is not a string"
+        for column in ("folder", "map_kind", "axis_unit", "data_kind")
+        if column in row and not isinstance(row[column], str)
+    ]
+    problems += [
+        f"{where} {column!r} is not an integer"
+        for column in ("n_points", "n_images")
+        if column in row and not _is_int(row[column])
+    ]
+    problems += [
+        f"{where} {column!r} is not a number"
+        for column in ("axis_min", "axis_max")
+        if column in row and not _is_number(row[column])
+    ]
+    return problems
+
+
+def _row_problems(i: int, row: object) -> list[str]:
+    """What is wrong with one catalog row; an unpacked (status "ok") row needs its numbers and strings too."""
+    if not isinstance(row, dict):
+        return [f"maps[{i}] is not an object"]
+    where = f"maps[{i}]"
+    problems = [f"{where} has no {column!r}" for column in CATALOG_COLUMNS if column not in row]
+    for column in ("name", "source_path", "sha256", "status"):
+        if column in row and not isinstance(row[column], str):
+            problems.append(f"{where} {column!r} is not a string")
+    if row.get("status") == OK:
+        problems += _unpacked_row_problems(where, row)
+    return problems
+
+
+def check_catalog(content: object) -> None:
+    """Raise one `OmnicFormatError` that lists every problem in the parsed content of a `catalog.json`.
+
+    Checks the format name and version, that `maps` is a list of objects with every catalog column,
+    and that the rows of unpacked maps hold the text and numbers the readers use. A name that is not a safe folder
+    name is not an error here: `valid_name` refuses it where it would be used, and `unpack` gives the map a new one.
+    """
+    if not isinstance(content, dict):
+        raise OmnicFormatError(f"the content is a {type(content).__name__}, not an object")
+    problems = []
+    if content.get("format") != PROJECT_FORMAT or content.get("format_version") != PROJECT_VERSION:
+        problems.append(f"not an {PROJECT_FORMAT!r} catalog of version {PROJECT_VERSION}")
+    if not isinstance(content.get("maps"), list):
+        problems.append("'maps' is missing" if "maps" not in content else "'maps' is not a list")
+    else:
+        for i, row in enumerate(content["maps"]):
+            problems += _row_problems(i, row)
+    if problems:
+        raise OmnicFormatError("; ".join(problems))
+
+
 def _read_catalog(project_dir: Path) -> list[Row]:
     path = project_dir / CATALOG_JSON
     if not path.is_file():
         raise OmnicFormatError(f"{project_dir}: no {CATALOG_JSON}; this is not a project folder")
-    content = json.loads(path.read_text(encoding="utf-8"))
-    if content.get("format") != PROJECT_FORMAT or content.get("format_version") != PROJECT_VERSION:
-        raise OmnicFormatError(f"{path}: not an {PROJECT_FORMAT!r} catalog of version {PROJECT_VERSION}")
+    try:
+        content = json.loads(path.read_text(encoding="utf-8"))
+        check_catalog(content)
+    except json.JSONDecodeError as error:
+        raise OmnicFormatError(f"{path}: not valid JSON ({error})") from None
+    except OmnicFormatError as error:
+        raise OmnicFormatError(f"{path}: {error}") from None
     return content["maps"]
 
 

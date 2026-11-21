@@ -30,7 +30,7 @@ All numbers are little-endian.
 | 0x000 | 18 bytes | magic: `Spectral Data File` (classic layout, also used by `.spa`) or `Spectral Exte File` (extended layout) | verified |
 | 0x01E | char[] | file title, null-terminated | consistent |
 | 0x126 | uint16 | number of directory entries | consistent |
-| 0x128 | uint32 | file time, seconds since 1899-12-31 (equals the last background time on the extended maps) | consistent |
+| 0x128 | uint32 | file time, seconds since 1899-12-31. On the extended maps it is later than the last background time: by 1 s, 51 s and 4 min 21 s in the three extended test files (grid, array and line map), so it is not that time | consistent |
 | 0x130 | entries | block directory | verified |
 
 Directory entries:
@@ -130,7 +130,7 @@ The only text found is the history. The aperture used appears only in the file n
 | +20 | float32 | first X | verified |
 | +28 | uint32 | interferogram points collected: 8480 on the plate map named "4cmRes" and on most 2017 maps, 4384 on the 2025 array maps, 2336 on the "ultrafast" maps. The nominal resolution itself is not stored as a value | consistent |
 | +32 | uint32 | interferogram peak position | per PyMca |
-| +36 | uint32 | number of sample scans | verified (matches the "128 avg"/"256 avg" in file names) |
+| +36 | uint32 | number of sample scans | consistent: matches the "128 avg", "256avg" in the names of the maps that state it, but the interferogram map named "256 averages" stores 8 |
 | +44 | uint32 | number of FFT points | per PyMca |
 | +52 | uint32 | number of background scans | verified (the plate map says "256BkAvg") |
 | +56 | float32 | background gain | per PyMca |
@@ -163,7 +163,7 @@ Notes:
 | +180 | char[256] | map title | consistent |
 | +586 | char[256] | original file name | consistent |
 | +844 | char[256] | original directory on the instrument PC | consistent |
-| +1146 | records | point list: uint16 0x65, three uint16, uint32 count, then count X and count Y float64 and per-point records. In the classic point map these include the six Z values | partly |
+| +1146 | records | point list: uint16 0x65, three uint16, uint32 count (at +1154), then count X (from +1158) and count Y float64 and per-point records. In the classic point map these include the six Z values, float64 at +1414, equal to the key-6 index-4 array | partly |
 
 ## 6. Spectra and per-spectrum headers
 

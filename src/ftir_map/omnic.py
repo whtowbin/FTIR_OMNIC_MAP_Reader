@@ -342,7 +342,8 @@ def _data_kind(y_units: int) -> str:
     return DATA_KINDS.get(y_units, f"unknown (code {y_units})")
 
 
-def _axis(header: CollectionParameters) -> np.ndarray:
+def header_axis(header: CollectionParameters) -> np.ndarray:
+    """The axis a spectral header describes, in stored order: `linspace(first_x, last_x, n_points)`."""
     return np.linspace(header.first_x, header.last_x, header.n_points)
 
 
@@ -438,7 +439,7 @@ def _backgrounds(data: bytes, blocks: list[Block]) -> list[Background]:
         if b.key == KEY_SPECTRAL_HEADER and b.index == 0:
             header = parse_spectral_header(data, b.offset) if b.size >= SPECTRAL_HEADER_SIZE else None
         elif b.key == KEY_DATA and b.index == 0 and header is not None and b.size == 4 * header.n_points:
-            spectrum, wavenumber = np.frombuffer(data, "<f4", header.n_points, b.offset).copy(), _axis(header)
+            spectrum, wavenumber = np.frombuffer(data, "<f4", header.n_points, b.offset).copy(), header_axis(header)
             if header.x_units == "cm-1" and wavenumber[0] > wavenumber[-1]:  # ascending, like the map's axis
                 spectrum, wavenumber = spectrum[::-1].copy(), wavenumber[::-1].copy()
             out.append(Background(spectrum, wavenumber, header.data_kind))
@@ -634,7 +635,7 @@ def _read(path: Path, data: bytes) -> OmnicMap:
     except OmnicFormatError as e:
         raise OmnicFormatError(f"{path.name}: {e}") from None
     spectra = np.vstack(spectra).astype(np.float32)
-    axis = _axis(collection)
+    axis = header_axis(collection)
     if collection.x_units == "cm-1" and axis[0] > axis[-1]:
         axis, spectra = axis[::-1].copy(), spectra[:, ::-1].copy()
 

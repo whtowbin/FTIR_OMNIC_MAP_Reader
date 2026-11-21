@@ -2,7 +2,9 @@
 
 import csv
 import dataclasses
+import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -16,7 +18,8 @@ import xarray as xr
 import ftir_map
 from ftir_map import Project, load, open_project, read_omnic, read_unpacked, unpack
 from ftir_map.omnic import OmnicFormatError, OmnicMap
-from ftir_map.project import find_sources, safe_name
+from ftir_map.project import check_catalog, find_sources, safe_name, unique_name
+from ftir_map.unpacked import check_map_json
 
 from .omnic_writer import marker_bmp, write_map
 from .test_exports import REAL_MAPS, grid_map, point_map
@@ -174,7 +177,9 @@ def test_folder_layout_and_original_images(tmp_path):
     assert (out / "source/grid.map").read_bytes() == m.path.read_bytes()
     meta = json.loads((out / "map.json").read_text(encoding="utf-8"))
     assert (meta["format"], meta["format_version"]) == ("ftir-map unpacked", 1)
-    assert meta["source"]["file_name"] == "grid.map" and len(meta["source"]["sha256"]) == 64
+    assert meta["source"]["file_name"] == "grid.map"
+    assert meta["source"]["sha256"] == hashlib.sha256(m.path.read_bytes()).hexdigest()  # the file's own checksum
+    assert meta["source"]["size_bytes"] == m.path.stat().st_size
     assert meta["metadata"]["collection"]["n_sample_scans"] == 16
     assert "xr.open_zarr" in (out / "README.txt").read_text(encoding="utf-8")
 
@@ -382,7 +387,10 @@ def test_load_dispatches_on_the_path(library, tmp_path):
 
 # ------------------------------------------------------------------ command line
 def run_cli(*args):
-    return subprocess.run([sys.executable, "-m", "ftir_map.cli", *args], capture_output=True, text=True, check=False)
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}  # the copy under test
+    return subprocess.run(
+        [sys.executable, "-m", "ftir_map.cli", *args], capture_output=True, text=True, check=False, env=env
+    )
 
 
 def test_cli_unpack_and_catalog(library, tmp_path):
@@ -720,3 +728,320 @@ def test_netcdf_with_an_external_link_or_virtual_dataset_is_refused(tmp_path):
         file.create_virtual_dataset("virtual", layout)
     with pytest.raises(UnsafeNetcdfFile, match="another file"):
         read_unpacked(tmp_path / "u")
+
+
+# ------------------------------------------------------------------ what an unpack does and does not create
+def test_default_unpack_creates_no_png_and_no_source_folder(tmp_path):
+    m = grid_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+    m.unpack(tmp_path / "out")
+    out = tmp_path / "out"
+    assert (out / "images").is_dir() and not (out / "images" / "png").exists()  # unpacked.md: png only with --png
+    assert not (out / "source").exists()  # unpacked.md: source only with --copy-source
+    assert json.loads((out / "map.json").read_text(encoding="utf-8"))["source"]["copied_to"] is None
+
+
+def test_default_project_unpack_creates_no_png_and_no_source_folder(tmp_path):
+    # project.unpack has its own png/copy_source defaults (what `ftir-map unpack` uses), separate from unpack_map's
+    m = grid_map(tmp_path, images=[RECT], image_bmp=marker_bmp())
+    project = unpack([m.path], tmp_path / "project")
+    folder = project.folder(project.names[0])
+    assert (folder / "images").is_dir() and not (folder / "images" / "png").exists()  # unpacked.md
+    assert not (folder / "source").exists()  # unpacked.md: source only with --copy-source
+
+
+# ------------------------------------------------------------------ backgrounds come back exactly (unpacked.md)
+@pytest.mark.parametrize("spectra_format", ["zarr", "csv"])
+@pytest.mark.parametrize("layout", ["classic", "extended"])
+@pytest.mark.parametrize(("first_x", "last_x"), [(4000.0, 650.0), (650.0, 4000.0)], ids=["descending", "ascending"])
+def test_background_wavenumbers_round_trip_bit_for_bit(tmp_path, layout, first_x, last_x, spectra_format):
+    # linspace(4000, 650) reversed differs from linspace(650, 4000) by up to 4.5e-13; the reader builds the first
+    path = tmp_path / "m.map"
+    write_map(path, np.zeros((4, 4), np.float32), np.zeros((4, 2)), layout=layout, first_x=first_x, last_x=last_x)
+    m = read_omnic(path)
+    m.unpack(tmp_path / "out", spectra=spectra_format)
+    back = read_unpacked(tmp_path / "out")
+    assert m.backgrounds and len(back.backgrounds) == len(m.backgrounds)
+    for before, after in zip(m.backgrounds, back.backgrounds, strict=True):
+        np.testing.assert_array_equal(before.wavenumber, after.wavenumber)
+
+
+@pytest.mark.parametrize("spectra_format", ["zarr", "csv"])
+def test_a_background_with_other_ends_than_the_header_gets_its_own_linspace(tmp_path, spectra_format):
+    # map.json keeps each background's two ends (unpacked_format.md); the header's axis is used only when they match
+    path = tmp_path / "m.map"
+    write_map(path, np.zeros((4, 4), np.float32), np.zeros((4, 2)), first_x=650.0, last_x=4000.0)
+    m = read_omnic(path)
+    own_axis = np.linspace(700.0, 3900.0, len(m.axis))
+    m.backgrounds[0].wavenumber = own_axis
+    m.unpack(tmp_path / "out", spectra=spectra_format)
+    back = read_unpacked(tmp_path / "out")
+    np.testing.assert_array_equal(back.backgrounds[0].wavenumber, own_axis)
+    np.testing.assert_array_equal(back.backgrounds[-1].wavenumber, m.backgrounds[-1].wavenumber)
+
+
+# ------------------------------------------------------------------ names of maps with the same file name
+def test_unique_name_follows_the_documented_scheme():
+    sha = "0123456789abcdef" * 4
+    path = Path("some/folder/a.map")
+    assert unique_name(path, sha, set()) == "a"
+    assert unique_name(path, sha, {"a"}) == "a_01234567"  # unpacked_format.md: the first 8 characters of the sha256
+    assert unique_name(path, sha, {"a", "a_01234567"}) == "a_01234567_2"  # then a counter
+    assert unique_name(path, sha, {"a", "a_01234567", "a_01234567_2"}) == "a_01234567_3"
+    assert unique_name(Path("A.map"), sha, {"a"}) == "A_01234567"  # taken names are case-folded
+
+
+def test_three_files_with_one_name_get_the_documented_names(tmp_path):
+    first, second = tmp_path / "x" / "a.map", tmp_path / "y" / "a.map"
+    third = tmp_path / "z" / "a.map"
+    for folder in (first.parent, second.parent, third.parent):
+        folder.mkdir()
+    write_map(first, spectra(6), GRID, kind="area")
+    write_map(second, spectra(4), LINE[:4], layout="classic")
+    shutil.copy(second, third)  # same content, so the same checksum as the second
+    project = unpack([first, second, third], tmp_path / "project")
+    digest = hashlib.sha256(second.read_bytes()).hexdigest()[:8]
+    assert [row["name"] for row in project.rows] == ["a", f"a_{digest}", f"a_{digest}_2"]
+    assert [row["folder"] for row in project.rows] == ["maps/a", f"maps/a_{digest}", f"maps/a_{digest}_2"]
+    assert sorted(p.name for p in (tmp_path / "project/maps").iterdir()) == sorted(row["name"] for row in project.rows)
+
+
+# ------------------------------------------------------------------ damaged files are OmnicFormatError, never a raw error
+@pytest.fixture
+def unpacked_folder(tmp_path):
+    grid_map(tmp_path).unpack(tmp_path / "out")
+    return tmp_path / "out"
+
+
+def edit_map_json(folder, change):
+    path = folder / "map.json"
+    content = json.loads(path.read_text(encoding="utf-8"))
+    change(content)
+    path.write_text(json.dumps(content), encoding="utf-8")
+
+
+def set_n_points(content):
+    content["metadata"].update(n_points=99, grid_shape=None)  # no grid, so only the spectra file can say it is wrong
+
+
+def drop_background_records(content):
+    content["backgrounds"] = []
+
+
+def set_grid_shape(content):
+    content["metadata"]["grid_shape"] = [1, 2]
+
+
+def drop_metadata(content):
+    del content["metadata"]
+
+
+def set_wrong_format(content):
+    content["format"] = "other"
+
+
+@pytest.mark.parametrize(
+    ("change", "pattern"),
+    [
+        (set_n_points, r"n_points is 99 but the spectra file holds 6 spectra"),
+        (drop_background_records, r"0 background records but 1 backgrounds"),
+        (set_grid_shape, r"grid_shape \[1, 2\] holds 2 points but n_points is 6"),
+        (drop_metadata, r"no 'metadata'"),
+        (set_wrong_format, r"format is 'other'"),
+    ],
+)
+def test_a_tampered_map_json_is_an_omnic_format_error(unpacked_folder, change, pattern):
+    edit_map_json(unpacked_folder, change)
+    with pytest.raises(OmnicFormatError, match=pattern):
+        read_unpacked(unpacked_folder)
+
+
+@pytest.mark.parametrize(("text", "pattern"), [("{not json", "not valid JSON"), ("[]", "a list, not an object")])
+def test_a_map_json_that_is_not_an_object_is_an_omnic_format_error(unpacked_folder, text, pattern):
+    (unpacked_folder / "map.json").write_text(text, encoding="utf-8")
+    with pytest.raises(OmnicFormatError, match=pattern):
+        read_unpacked(unpacked_folder)
+
+
+def test_a_points_csv_with_a_row_missing_is_an_omnic_format_error(tmp_path):
+    grid_map(tmp_path).unpack(tmp_path / "out", spectra="csv")
+    lines = (tmp_path / "out" / "points.csv").read_text(encoding="utf-8").splitlines()
+    (tmp_path / "out" / "points.csv").write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    with pytest.raises(OmnicFormatError, match="points.csv has 5 rows but spectra.csv has 6 spectra"):
+        read_unpacked(tmp_path / "out")
+
+
+def test_grid_cells_outside_the_grid_shape_are_an_omnic_format_error(unpacked_folder):
+    edit_map_json(unpacked_folder, lambda content: content["metadata"].update(grid_shape=[1, 6]))  # 6 points, 1 row
+    with pytest.raises(OmnicFormatError, match="'grid_row' does not fit grid_shape"):
+        read_unpacked(unpacked_folder)
+
+
+# ------------------------------------------------------------------ the pure checks
+def good_map_json(tmp_path):
+    tmp_path.mkdir(exist_ok=True)
+    return json.loads(json.dumps(grid_map(tmp_path).unpack(tmp_path / "out")))
+
+
+def test_check_map_json_accepts_what_unpack_writes(tmp_path):
+    assert check_map_json(good_map_json(tmp_path)) is None
+    assert check_map_json(json.loads((tmp_path / "out" / "map.json").read_text(encoding="utf-8"))) is None
+
+
+@pytest.mark.parametrize("content", [None, [], "map.json", 3])
+def test_check_map_json_refuses_anything_but_an_object(content):
+    with pytest.raises(OmnicFormatError, match="not an object"):
+        check_map_json(content)
+
+
+def test_check_map_json_lists_every_problem_in_one_message(tmp_path):
+    content = good_map_json(tmp_path)
+    content["format"], content["format_version"] = "other", 2
+    del content["source"], content["images"]
+    content["files"]["spectra_format"] = "npz"
+    content["backgrounds"] = {}
+    content["metadata"]["n_points"] = "6"
+    del content["metadata"]["layout"], content["metadata"]["collection"]["first_x"]
+    with pytest.raises(OmnicFormatError) as error:
+        check_map_json(content)
+    problems = str(error.value).split("; ")
+    assert problems == [
+        "format is 'other', not 'ftir-map unpacked'",
+        "format version 2, this reader reads 1",
+        "no 'source'",
+        "'backgrounds' is not a list",
+        "no 'images'",
+        "'files' spectra_format is not one of ['zarr', 'csv', 'nc']",
+        "'metadata' has no 'layout'",
+        "n_points is '6', not a positive integer",
+        "'collection' has no 'first_x'",
+    ]
+
+
+def test_check_map_json_checks_grid_shape_against_n_points(tmp_path):
+    for shape, message in (
+        ([2, 3], None),
+        ([1, 2], "holds 2 points but n_points is 6"),
+        ([6], "not null or two positive"),
+    ):
+        content = good_map_json(tmp_path / f"m{len(shape)}{shape[0]}")
+        content["metadata"]["grid_shape"] = shape
+        if message is None:
+            assert check_map_json(content) is None
+        else:
+            with pytest.raises(OmnicFormatError, match=message):
+                check_map_json(content)
+    content = good_map_json(tmp_path / "null")
+    content["metadata"]["grid_shape"] = None
+    assert check_map_json(content) is None  # line and point maps have no grid
+
+
+def test_check_map_json_checks_the_records(tmp_path):
+    content = good_map_json(tmp_path)
+    content["backgrounds"] = [{"title": "b"}, 3]
+    content["images"] = [{"index": 1}]
+    with pytest.raises(OmnicFormatError) as error:
+        check_map_json(content)
+    message = str(error.value)
+    assert "backgrounds[0] has no 'wavenumber_last'" in message and "backgrounds[1] is not a dict" in message
+    assert "images[0] has no 'extent'" in message
+
+
+def test_check_map_json_checks_the_keys_of_source_and_files(tmp_path):
+    content = good_map_json(tmp_path)
+    del content["source"]["sha256"], content["files"]["points"]
+    with pytest.raises(OmnicFormatError) as error:
+        check_map_json(content)
+    assert str(error.value).split("; ") == ["'source' has no 'sha256'", "'files' has no 'points'"]
+
+
+def good_catalog(tmp_path):
+    (tmp_path / "lib").mkdir()
+    write_map(tmp_path / "lib" / "g.map", spectra(6), GRID, kind="area")
+    (tmp_path / "lib" / "broken.map").write_bytes(b"not an omnic file at all" * 20)
+    unpack([tmp_path / "lib"], tmp_path / "project")
+    return json.loads((tmp_path / "project" / "catalog.json").read_text(encoding="utf-8"))
+
+
+def test_check_catalog_accepts_what_unpack_writes(tmp_path):
+    content = good_catalog(tmp_path)
+    assert {row["status"] == "ok" for row in content["maps"]} == {True, False}  # an unpacked and a skipped row
+    assert check_catalog(content) is None
+
+
+@pytest.mark.parametrize("content", [None, [], "catalog", 3])
+def test_check_catalog_refuses_anything_but_an_object(content):
+    with pytest.raises(OmnicFormatError, match="not an object"):
+        check_catalog(content)
+
+
+def test_check_catalog_lists_every_problem_in_one_message(tmp_path):
+    content = good_catalog(tmp_path)
+    ok = next(row for row in content["maps"] if row["status"] == "ok")
+    skipped = next(row for row in content["maps"] if row["status"] != "ok")
+    content["format_version"] = 2
+    del ok["axis_min"], ok["sha256"]
+    ok["n_points"] = "6"
+    skipped["name"] = 5
+    content["maps"].append("g")
+    with pytest.raises(OmnicFormatError) as error:
+        check_catalog(content)
+    i, j = content["maps"].index(ok), content["maps"].index(skipped)
+    by_row = {
+        i: [f"maps[{i}] has no 'sha256'", f"maps[{i}] has no 'axis_min'", f"maps[{i}] 'n_points' is not an integer"],
+        j: [f"maps[{j}] 'name' is not a string"],
+        2: ["maps[2] is not an object"],
+    }
+    assert str(error.value).split("; ") == [
+        "not an 'ftir-map project' catalog of version 1",
+        *(problem for row in sorted(by_row) for problem in by_row[row]),
+    ]
+
+
+def test_check_catalog_requires_numbers_in_the_axis_range_of_an_unpacked_row(tmp_path):
+    content = good_catalog(tmp_path)
+    ok = next(row for row in content["maps"] if row["status"] == "ok")
+    ok["axis_min"], ok["axis_max"] = "650", True
+    with pytest.raises(OmnicFormatError) as error:
+        check_catalog(content)
+    i = content["maps"].index(ok)
+    assert str(error.value).split("; ") == [
+        f"maps[{i}] 'axis_min' is not a number",
+        f"maps[{i}] 'axis_max' is not a number",
+    ]
+
+
+def test_check_catalog_requires_a_list_of_maps(tmp_path):
+    content = good_catalog(tmp_path)
+    maps = content.pop("maps")
+    with pytest.raises(OmnicFormatError, match="'maps' is missing"):
+        check_catalog(content)
+    with pytest.raises(OmnicFormatError, match="'maps' is not a list"):
+        check_catalog({**content, "maps": dict(enumerate(maps))})
+
+
+# ------------------------------------------------------------------ a damaged catalog.json through open_project
+@pytest.mark.parametrize(
+    ("change", "pattern"),
+    [
+        (lambda content: content.pop("maps"), "'maps' is missing"),
+        (lambda content: content["maps"][0].pop("axis_min"), "has no 'axis_min'"),
+        (lambda content: content["maps"][0].pop("sha256"), "has no 'sha256'"),
+    ],
+    ids=["no maps", "no axis_min", "no sha256"],
+)
+def test_open_project_on_a_damaged_catalog_is_an_omnic_format_error(library, tmp_path, change, pattern):
+    unpack([library], tmp_path / "project")
+    path = tmp_path / "project" / "catalog.json"
+    content = json.loads(path.read_text(encoding="utf-8"))
+    change(content)
+    path.write_text(json.dumps(content), encoding="utf-8")
+    with pytest.raises(OmnicFormatError, match=pattern):
+        open_project(tmp_path / "project")
+    with pytest.raises(OmnicFormatError, match=pattern):
+        unpack([library], tmp_path / "project")  # a rerun reads the same catalog
+
+
+def test_open_project_on_a_catalog_that_is_not_json_is_an_omnic_format_error(tmp_path):
+    (tmp_path / "catalog.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(OmnicFormatError, match="not valid JSON"):
+        open_project(tmp_path)
