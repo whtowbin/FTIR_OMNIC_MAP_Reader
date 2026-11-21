@@ -82,7 +82,8 @@ print(same.map_kind)
 - `ftir_map.open_project(folder)` opens an existing project; `Project` has `catalog`, `names`, `rows`, `folder(name)`,
   `load(name)` and `to_xarray(name)`, and supports `len()`, iteration and `in`.
 - `ftir_map.read_unpacked(folder)` rebuilds the `OmnicMap` from one unpacked map folder. The spectra, axis, positions,
-  titles, times, backgrounds, images and decoded metadata come back exactly. The raw header bytes and the block
+  titles, times, backgrounds, images and decoded metadata come back exactly. A folder whose `map.json` or spectra file is damaged or disagrees with it (not JSON, a missing key, an `n_points`
+  that is not the number of spectra, a missing background) raises `OmnicFormatError` with every problem found in one message. The raw header bytes and the block
   directory are not kept, so `block_bytes()` needs the original `.map` file.
 - `ftir_map.load(path)` opens whatever `path` is: a `.map` file, an unpacked map folder or a project folder.
 - `m.unpack(folder)` unpacks one already-read map into a single map folder (the same as `unpack_map`).

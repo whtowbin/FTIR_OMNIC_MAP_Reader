@@ -27,7 +27,7 @@ my_map/
 
 | Key | Content |
 |---|---|
-| `format`, `format_version` | `"ftir-map unpacked"` and `1`. A reader must refuse any other version. |
+| `format`, `format_version` | `"ftir-map unpacked"` and `1`. A reader must refuse any other version. Likewise a `map.json` that is not an object, lacks a key listed here, or whose `n_points`, `grid_shape` and `backgrounds` do not match the spectra file. |
 | `reader_version` | Version of ftir-OMNIC-map-reader that wrote the folder. |
 | `unpacked_at` | UTC time, ISO 8601. |
 | `source` | `file_name`, `path`, `size_bytes`, `sha256` of the original `.map`, and `copied_to` (path under the map folder, or null). |
@@ -47,7 +47,7 @@ which cell each point belongs to. A variable the map did not record is absent.
 
 | Variable | Dimensions | Type | Content |
 |---|---|---|---|
-| `spectra` | point, wavenumber | float32 | Spectra as stored. NaN and infinity are kept. |
+| `spectra` | point, wavenumber | float32 | Spectra as stored. NaN and infinity are kept; Zarr and netCDF keep the exact bits, the CSV layout keeps NaN but not its sign or payload bits. |
 | `wavenumber` | wavenumber | float64 | Spectral axis, ascending, attribute `units` = `cm-1`. |
 | `axis` | axis | float64 | Replaces `wavenumber` for interferogram maps, `units` = `points`. The dimension of `spectra` is then `axis`. |
 | `point` | point | int64 | 0, 1, 2 ... in file order. |
@@ -119,7 +119,7 @@ project/
 ```
 
 `<name>` is the file name without extension, with every character other than letters, digits, `.`, `-` and `_` replaced
-by `_`. If the name is taken by another file, the first 8 characters of the file's sha256 are appended.
+by `_`. If the name is taken by another file, the first 8 characters of the file's sha256 are appended, and if that name is taken too, a counter (`_2`, `_3`, ...).
 
 ### catalog.json and catalog.csv
 

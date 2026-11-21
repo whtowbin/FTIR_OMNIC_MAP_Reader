@@ -1,5 +1,6 @@
 """The exports of OmnicMap: xarray, NumPy, dict, Zarr and images, on synthetic files and on the files in tests/data."""
 
+import dataclasses
 import json
 import os
 import sys
@@ -11,6 +12,7 @@ import xarray as xr
 from PIL import Image
 
 from ftir_map import read_omnic
+from ftir_map.exports import backgrounds_array
 
 from .omnic_writer import marker_bmp, write_map
 from .test_omnic import ARRAY_MAP, GRID, LINE, N_WN, POINTS, as_stored, real, spectra
@@ -52,11 +54,16 @@ def test_to_xarray_grid(tmp_path, layout):
     np.testing.assert_array_equal(ds["spectra"].values.reshape(6, N_WN), spectra(6))
     np.testing.assert_array_equal(ds["x"].values, [100.0, 125.0, 150.0])  # absolute stage um
     np.testing.assert_array_equal(ds["y"].values, [200.0, 250.0])
-    np.testing.assert_allclose(ds["wavenumber"].values, np.linspace(650.0, 4000.0, N_WN), rtol=1e-6)
+    np.testing.assert_array_equal(ds["wavenumber"].values, np.linspace(650.0, 4000.0, N_WN))  # exact in float32
     assert ds["time_s"].dims == ("y", "x")
     np.testing.assert_allclose(ds["time_s"].values.ravel(), 90.0 * np.arange(6))
     assert ds["backgrounds"].dims == ("background", "wavenumber")
-    np.testing.assert_allclose(ds["backgrounds"].values[0], np.linspace(1.0, 2.0, N_WN), rtol=1e-6)
+    np.testing.assert_array_equal(ds["backgrounds"].values[0], np.linspace(1.0, 2.0, N_WN, dtype=np.float32))
+    assert dict(ds.sizes) == {"y": 2, "x": 3, "wavenumber": N_WN, "background": 1}
+    assert ds["x"].attrs["units"] == ds["y"].attrs["units"] == "um"
+    assert ds["wavenumber"].attrs["units"] == "cm-1"
+    assert ds["background_title"].dims == ("background",)
+    assert list(ds["background_title"].values) == (["background 1"] if layout == "extended" else [""])
     assert ds.attrs["map_kind"] == "grid" and ds.attrs["grid_shape"] == [2, 3]
     assert ds.attrs["axis_unit"] == "cm-1"
 
@@ -78,6 +85,13 @@ def test_to_xarray_points(tmp_path, layout, positions):
     np.testing.assert_allclose(ds["time_s"].values, 90.0 * np.arange(len(positions)))
     assert ds["background_index"].dtype.kind == "i"
     assert ds.attrs["map_kind"] == m.map_kind
+    # docs/site/exports.md: the point dimension, the spectral axis and the one background
+    assert dict(ds.sizes) == {"point": len(positions), "wavenumber": N_WN, "background": 1}
+    np.testing.assert_array_equal(ds["point"].values, np.arange(len(positions)))  # file (acquisition) order
+    assert ds["x"].attrs["units"] == ds["y"].attrs["units"] == "um"
+    assert ds["time_s"].attrs["units"] == "s" and ds["wavenumber"].attrs["units"] == "cm-1"
+    assert ("units" in ds["z"].attrs and ds["z"].attrs["units"] == "um") if z is not None else "z" not in ds
+    assert list(ds["background_title"].values) == (["background 1"] if layout == "extended" else [""])
 
 
 def test_attrs_are_json_and_exclude_raw_bytes(tmp_path):
@@ -109,6 +123,7 @@ def test_interferogram_dimension_is_axis(tmp_path):
     ds = m.to_xarray()
     assert ds["spectra"].dims == ("point", "axis")
     assert ds["axis"].attrs["units"] == "points"
+    assert ds["backgrounds"].dims == ("background", "axis")
     assert "axis" in m.to_numpy()[1] and "wavenumber" not in m.to_numpy()[1]
 
 
@@ -272,10 +287,68 @@ def test_real_images_have_extents_and_decode():
         xmin, xmax, ymin, ymax = image.extent
         assert xmin < xmax and ymin < ymax
         assert image.array.shape[:2] == (686, 878)
-        assert (xmax - xmin) / image.array.shape[1] == pytest.approx(0.58, abs=0.01)  # um per pixel
+        # um per pixel: golden values measured on this file (0.58087 and 0.58892, 4 decimals, so 5e-5);
+        # file_format.md section 8 gives 0.581 x 0.589 for the 2017 instrument
+        assert (xmax - xmin) / image.array.shape[1] == pytest.approx(0.5809, abs=5e-5)
+        assert (ymax - ymin) / image.array.shape[0] == pytest.approx(0.5889, abs=5e-5)
 
 
 def test_real_array_map_has_16_backgrounds():
     ds = read_omnic(real(ARRAY_MAP.name)).to_xarray()
     assert ds["backgrounds"].shape == (16, ds["wavenumber"].size)
     assert ds["background_index"].dims == ("y", "x") and int(ds["background_index"].max()) == 15
+
+
+# ------------------------------------------------------------------ backgrounds and Zarr targets
+def test_backgrounds_stored_descending_are_returned_on_the_ascending_axis(tmp_path):
+    m = grid_map(tmp_path, first_x=4000.0, last_x=650.0)  # the writer stores the background 1 -> 2 from 4000 to 650
+    stored = np.linspace(1.0, 2.0, N_WN, dtype=np.float32)
+    np.testing.assert_array_equal(m.to_xarray()["backgrounds"].values[0], stored[::-1])  # ascending: 2 -> 1
+    # a background whose own axis is still descending (built by hand: the reader already reverses it) is flipped
+    (background,) = m.backgrounds
+    descending = dataclasses.replace(background, spectrum=background.spectrum[::-1], wavenumber=m.axis[::-1])
+    np.testing.assert_array_equal(
+        backgrounds_array(dataclasses.replace(m, backgrounds=[descending])), background.spectrum[None, :]
+    )
+
+
+def test_interferogram_backgrounds_keep_their_stored_order(tmp_path):
+    path = tmp_path / "ifg.map"
+    write_map(path, spectra(5), LINE, first_x=float(N_WN - 1), last_x=0.0, data_kind="interferogram")
+    m = read_omnic(path)
+    assert m.axis[0] > m.axis[-1]  # data points, kept as stored: N - 1 down to 0
+    (background,) = m.backgrounds
+    stored = dataclasses.replace(background, wavenumber=m.axis)  # a background on the same descending point axis
+    np.testing.assert_array_equal(
+        backgrounds_array(dataclasses.replace(m, backgrounds=[stored])), background.spectrum[None, :]
+    )  # only a cm-1 axis is reversed
+
+
+def test_backgrounds_of_another_length_are_left_out(tmp_path):
+    m = grid_map(tmp_path)
+    (background,) = m.backgrounds
+    short = dataclasses.replace(background, spectrum=background.spectrum[:-1], wavenumber=background.wavenumber[:-1])
+    other = dataclasses.replace(m, backgrounds=[short])
+    assert backgrounds_array(other) is None
+    assert backgrounds_array(dataclasses.replace(m, backgrounds=[background, short])) is None  # one is enough
+    ds = other.to_xarray()
+    assert "backgrounds" not in ds and "background_title" not in ds.coords
+
+
+@pytest.mark.parametrize("metadata_file", ["zarr.json", ".zgroup", ".zarray"])
+def test_mode_w_replaces_a_folder_of_either_zarr_format_but_not_other_folders(tmp_path, metadata_file):
+    pytest.importorskip("zarr")
+    m = point_map(tmp_path)
+    store = tmp_path / "old"
+    store.mkdir()
+    (store / metadata_file).write_text("{}")
+    (store / "chunk").write_text("x")
+    m.to_zarr(store, mode="w")  # a Zarr store (format 2 or 3), so it may be replaced
+    with xr.open_zarr(store) as back:
+        assert_datasets_equal(back.load(), m.to_xarray())
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "notes.txt").write_text("keep me")
+    with pytest.raises(FileExistsError, match="not a Zarr store"):
+        m.to_zarr(plain, mode="w")
+    assert (plain / "notes.txt").read_text() == "keep me"

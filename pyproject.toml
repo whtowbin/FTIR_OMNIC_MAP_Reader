@@ -71,6 +71,7 @@ dev = [
     "pyyaml>=6",
     "pyarrow>=14",
     "types-pyyaml",
+    "hypothesis>=6.168.5",
 ]
 docs = [
     "mkdocs-material>=9.5",

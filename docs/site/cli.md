@@ -1,7 +1,7 @@
 # Command line
 
 Installing the package adds the `ftir-map` command, which has four subcommands. Errors print one line to stderr
-(`ftir-map: <message>`) and exit with status 1.
+(`ftir-map: <message>`) and exit with status 1, also for a damaged `catalog.json` (not JSON, no `maps`, a row without a column).
 
 ```console
 $ ftir-map --help

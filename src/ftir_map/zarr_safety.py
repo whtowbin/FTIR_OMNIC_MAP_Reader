@@ -115,5 +115,7 @@ def _check_v3_codecs(path: Path, codecs: Any) -> None:
             config = codec.get("configuration") if isinstance(codec, dict) else None
             if not isinstance(config, dict):
                 raise UnsafeZarrStore(f"{path}: sharding codec without a configuration object")
-            _check_v3_codecs(path, config.get("codecs", []))
-            _check_v3_codecs(path, config.get("index_codecs", []))
+            for key in ("codecs", "index_codecs"):  # both are required by the Zarr v3 sharding spec
+                if key not in config:
+                    raise UnsafeZarrStore(f"{path}: sharding codec without {key!r}")
+                _check_v3_codecs(path, config[key])

@@ -12,13 +12,14 @@ original .map file.
 from __future__ import annotations
 
 import csv
+import dataclasses
 import datetime as dt
 import hashlib
 import json
 import shutil
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import numpy as np
 import xarray as xr
@@ -41,6 +42,7 @@ from .omnic import (
     OmnicFormatError,
     OmnicMap,
     StageImage,
+    header_axis,
 )
 from .writers import save_images, save_points, save_spectra, write_json
 from .zarr_safety import check_zarr_store
@@ -70,6 +72,27 @@ CSV_OPTIONAL_COLUMNS = (
     ("background_index", "background_index", np.int64),
 )
 NC_COMPRESSION = {"zlib": True, "complevel": 4, "shuffle": True}
+# what read_unpacked needs from map.json; check_map_json reports every one that is missing or of the wrong type
+SECTIONS = (("source", dict), ("files", dict), ("metadata", dict), ("backgrounds", list), ("images", list))
+SOURCE_KEYS = ("file_name", "path", "size_bytes", "sha256")
+FILES_KEYS = ("spectra", "spectra_format", "points", "images")
+METADATA_KEYS = (
+    "layout",
+    "map_kind",
+    "data_kind",
+    "axis_unit",
+    "grid_shape",
+    "n_points",
+    "collection",
+    "map_definition",
+    "map_description",
+    "history",
+    "title",
+    "file_time",
+)
+BACKGROUND_KEYS = ("title", "time", "data_kind", "wavenumber_first", "wavenumber_last")
+IMAGE_KEYS = ("index", "format", "file", "width", "height", "extent")
+POINT_VARIABLES = ("spectra", "x", "y", "title", "time_s")
 
 
 def sha256_file(path: str | Path) -> str:
@@ -332,18 +355,125 @@ def unpack_map(
 
 
 # ------------------------------------------------------------------ reading
+def _missing(values: dict[str, Any], keys: tuple[str, ...], where: str) -> list[str]:
+    return [f"{where} has no {key!r}" for key in keys if key not in values]
+
+
+def _is_int(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _section_problems(content: dict[str, Any]) -> list[str]:
+    """Missing or mistyped top-level sections, then the keys inside each section that is there."""
+    problems = []
+    for key, kind in SECTIONS:
+        if key not in content:
+            problems.append(f"no {key!r}")
+        elif not isinstance(content[key], kind):
+            problems.append(f"{key!r} is not a {kind.__name__}")
+    if isinstance(content.get("source"), dict):
+        problems += _missing(content["source"], SOURCE_KEYS, "'source'")
+    if isinstance(content.get("files"), dict):
+        problems += _missing(content["files"], FILES_KEYS, "'files'")
+        if content["files"].get("spectra_format") not in SPECTRA_FORMATS:
+            problems.append(f"'files' spectra_format is not one of {list(SPECTRA_FORMATS)}")
+    for kind, keys in (("backgrounds", BACKGROUND_KEYS), ("images", IMAGE_KEYS)):
+        for i, record in enumerate(content[kind] if isinstance(content.get(kind), list) else []):
+            problems += (
+                _missing(record, keys, f"{kind}[{i}]") if isinstance(record, dict) else [f"{kind}[{i}] is not a dict"]
+            )
+    return problems
+
+
+def _metadata_problems(metadata: dict[str, Any]) -> list[str]:
+    """Missing keys in `metadata`, and a `grid_shape` or `n_points` that cannot be right."""
+    problems = _missing(metadata, METADATA_KEYS, "'metadata'")
+    n_points, shape = metadata.get("n_points"), metadata.get("grid_shape")
+    if "n_points" in metadata and not (_is_int(n_points) and n_points > 0):
+        problems.append(f"n_points is {n_points!r}, not a positive integer")
+    elif shape is not None and "grid_shape" in metadata:
+        if not (isinstance(shape, list) and len(shape) == 2 and all(_is_int(n) and n > 0 for n in shape)):
+            problems.append(f"grid_shape is {shape!r}, not null or two positive integers")
+        elif shape[0] * shape[1] != n_points:
+            problems.append(f"grid_shape {shape} holds {shape[0] * shape[1]} points but n_points is {n_points}")
+    collection = metadata.get("collection")
+    if "collection" in metadata and not isinstance(collection, dict):
+        problems.append("'collection' is not a dict")
+    elif isinstance(collection, dict):
+        required = tuple(
+            f.name for f in dataclasses.fields(CollectionParameters) if f.default_factory is dataclasses.MISSING
+        )
+        problems += _missing(collection, required, "'collection'")
+    description = metadata.get("map_description")
+    if isinstance(description, dict):
+        problems += _missing(description, ("first_location", "last_location", "x_step", "y_step"), "'map_description'")
+    return problems
+
+
+def check_map_json(content: object) -> None:
+    """Raise one `OmnicFormatError` that lists every problem in the parsed content of a `map.json`.
+
+    Checks the format name and version, the sections and keys `read_unpacked` needs and that `n_points` and
+    `grid_shape` agree. It does not look at the other files; `check_unpacked_data` compares them with the spectra file.
+    """
+    if not isinstance(content, dict):
+        raise OmnicFormatError(f"the content is a {type(content).__name__}, not an object")
+    problems = []
+    if content.get("format") != FORMAT_NAME:
+        problems.append(f"format is {content.get('format')!r}, not {FORMAT_NAME!r}")
+    if content.get("format_version") != FORMAT_VERSION:
+        problems.append(f"format version {content.get('format_version')}, this reader reads {FORMAT_VERSION}")
+    problems += _section_problems(content)
+    if isinstance(content.get("metadata"), dict):
+        problems += _metadata_problems(content["metadata"])
+    if problems:
+        raise OmnicFormatError("; ".join(problems))
+
+
+def check_unpacked_data(content: dict[str, Any], dataset: xr.Dataset) -> None:
+    """Raise one `OmnicFormatError` for every way the spectra file disagrees with a map.json that passed `check_map_json`.
+
+    Compares `n_points`, the grid cells (`grid_row`, `grid_column` against `grid_shape`) and the number of background
+    records with what the spectra file holds.
+    """
+    problems = [f"the spectra file has no {name!r}" for name in POINT_VARIABLES if name not in dataset]
+    n_points, shape = content["metadata"]["n_points"], content["metadata"]["grid_shape"]
+    if "spectra" in dataset and dataset["spectra"].sizes.get("point") != n_points:
+        problems.append(
+            f"n_points is {n_points} but the spectra file holds {dataset['spectra'].sizes.get('point')} spectra"
+        )
+    for name in ("x", "y", "title", "time_s"):
+        if name in dataset and dataset[name].size != n_points:
+            problems.append(f"{name!r} has {dataset[name].size} values, n_points is {n_points}")
+    if shape is not None:
+        for name, limit in (("grid_row", shape[0]), ("grid_column", shape[1])):
+            if name not in dataset:
+                problems.append(f"grid_shape is {shape} but the spectra file has no {name!r}")
+            elif dataset[name].size != n_points or (
+                dataset[name].size and not 0 <= dataset[name].min() <= dataset[name].max() < limit
+            ):
+                problems.append(f"{name!r} does not fit grid_shape {shape} and n_points {n_points}")
+    stored = dataset["backgrounds"].sizes["background"] if "backgrounds" in dataset else 0
+    if len(content["backgrounds"]) != stored:
+        problems.append(
+            f"{len(content['backgrounds'])} background records but {stored} backgrounds in the spectra file"
+        )
+    if problems:
+        raise OmnicFormatError("; ".join(problems))
+
+
 def read_map_json(folder: Path) -> dict[str, Any]:
-    """The parsed `map.json` of an unpacked-map folder, checked for format name and version."""
+    """The parsed `map.json` of an unpacked-map folder, checked by `check_map_json`."""
     path = folder / MAP_JSON
     if not path.is_file():
         raise OmnicFormatError(f"{folder}: no {MAP_JSON}; this is not an unpacked map folder")
-    content = json.loads(path.read_text(encoding="utf-8"))
-    if content.get("format") != FORMAT_NAME:
-        raise OmnicFormatError(f"{path}: format is {content.get('format')!r}, not {FORMAT_NAME!r}")
-    if content.get("format_version") != FORMAT_VERSION:
-        raise OmnicFormatError(
-            f"{path}: format version {content.get('format_version')}, this reader reads {FORMAT_VERSION}"
-        )
+    try:
+        content = json.loads(path.read_text(encoding="utf-8"))
+        check_map_json(content)
+    except json.JSONDecodeError as error:
+        raise OmnicFormatError(f"{path}: not valid JSON ({error})") from None
+    except OmnicFormatError as error:
+        raise OmnicFormatError(f"{path}: {error}") from None
     return content
 
 
@@ -378,6 +508,11 @@ def _dataset_from_csv(folder: Path, meta: dict[str, Any]) -> xr.Dataset:
     dim = axis_dimension(meta["metadata"]["axis_unit"])
     table = np.loadtxt(contained(folder, meta["files"]["spectra"]), delimiter=",", skiprows=1, ndmin=2)
     points = _points_from_csv(contained(folder, meta["files"]["points"]))
+    if len(points["x"]) != table.shape[1] - 1:
+        raise OmnicFormatError(
+            f"{folder}: {meta['files']['points']} has {len(points['x'])} rows but {meta['files']['spectra']} "
+            f"has {table.shape[1] - 1} spectra"
+        )
     variables: dict[str, Any] = {"spectra": (("point", dim), table[:, 1:].T.astype(np.float32))}
     variables.update({name: ("point", values) for name, values in points.items()})
     if (folder / BACKGROUNDS_CSV).exists():
@@ -456,7 +591,24 @@ def _description(values: dict[str, Any] | None) -> MapDescription | None:
     return MapDescription(first, last, x_step=_nan(values["x_step"]), y_step=_nan(values["y_step"]))
 
 
-def _backgrounds(dataset: xr.Dataset, records: list[dict[str, Any]], axis_unit: str) -> list[Background]:
+def _background_axis(record: dict[str, Any], n: int, collection: CollectionParameters) -> np.ndarray:
+    """The wavenumbers of a background, built as `read_omnic` builds them.
+
+    A background with the map's own header ends (the usual case) gets the reader's axis for that header: `linspace`
+    from `first_x` to `last_x`, reversed if that runs downward in cm-1. That is not equal to `linspace(last, first)` in
+    the last bits, and the stored ends alone do not say which direction the header had. Any other background gets the
+    ascending `linspace` between its two stored ends.
+    """
+    first, last = record["wavenumber_first"], record["wavenumber_last"]
+    if sorted((first, last)) != sorted((collection.first_x, collection.last_x)):
+        return np.linspace(first, last, n)
+    axis = header_axis(dataclasses.replace(collection, n_points=n))
+    return axis[::-1].copy() if collection.x_units == "cm-1" and axis[0] > axis[-1] else axis
+
+
+def _backgrounds(
+    dataset: xr.Dataset, records: list[dict[str, Any]], axis_unit: str, collection: CollectionParameters
+) -> list[Background]:
     """Backgrounds in the order and direction they were read: the file holds them on the ascending spectra axis."""
     out = []
     for row, record in zip(dataset["backgrounds"].values if records else [], records, strict=True):
@@ -464,7 +616,8 @@ def _backgrounds(dataset: xr.Dataset, records: list[dict[str, Any]], axis_unit: 
         descending = axis_unit == "cm-1" and first > last
         spectrum = np.ascontiguousarray(row[::-1] if descending else row, dtype=np.float32)
         time = dt.datetime.fromisoformat(record["time"]) if record["time"] else None
-        out.append(Background(spectrum, np.linspace(first, last, len(row)), record["data_kind"], record["title"], time))
+        wavenumber = _background_axis(record, len(row), collection)
+        out.append(Background(spectrum, wavenumber, record["data_kind"], record["title"], time))
     return out
 
 
@@ -503,6 +656,8 @@ def read_unpacked(folder: str | Path) -> OmnicMap:
     meta = read_map_json(folder)
     md = meta["metadata"]
     dataset = _open_spectra(folder, meta)
+    check_unpacked_data(meta, dataset)
+    collection = _collection(md["collection"])
     row, column = _optional(dataset, "grid_row", np.int64), _optional(dataset, "grid_column", np.int64)
     return OmnicMap(
         path=Path(meta["source"]["path"]),
@@ -519,8 +674,8 @@ def read_unpacked(folder: str | Path) -> OmnicMap:
         titles=[str(title) for title in dataset["title"].values],
         times_s=dataset["time_s"].values.astype(np.float64),
         data_kind=md["data_kind"],
-        collection=_collection(md["collection"]),
-        backgrounds=_backgrounds(dataset, meta["backgrounds"], md["axis_unit"]),
+        collection=collection,
+        backgrounds=_backgrounds(dataset, meta["backgrounds"], md["axis_unit"], collection),
         background_index=_optional(dataset, "background_index", np.int64),
         images=_images(folder, meta["files"], meta["images"]),
         map_definition=_definition(md["map_definition"]),

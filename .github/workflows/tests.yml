@@ -23,3 +23,5 @@ jobs:
         run: uv sync --all-extras
       - name: Run the tests
         run: uv run pytest -q
+        env:
+          HYPOTHESIS_PROFILE: ci  # tests/conftest.py: 200 examples per property test
