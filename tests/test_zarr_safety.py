@@ -1,8 +1,10 @@
 """check_zarr_store refuses Zarr metadata that could run code on read (pickle codecs, object arrays, links)."""
 
 import json
+import shutil
 
 import pytest
+import xarray as xr
 
 from ftir_map import read_unpacked
 from ftir_map.zarr_safety import UnsafeZarrStore, check_zarr_store
@@ -126,16 +128,28 @@ def test_a_well_formed_sharding_codec_is_allowed(tmp_path):
     check_zarr_store(v3_store(tmp_path, codecs=[{"name": "sharding_indexed", "configuration": config}]))
 
 
-def test_consolidated_metadata_is_never_used(tmp_path):
+def rewrite_as_zarr_format_2(store):
+    """The store as zarr 2 wrote it (unpacked on Python 3.10 with ftir_map 1.1): format 2 with a .zmetadata copy."""
+    dataset = xr.open_zarr(store, consolidated=False).load()
+    for variable in dataset.variables.values():
+        variable.encoding = {}
+    shutil.rmtree(store)
+    dataset.to_zarr(store, zarr_format=2, consolidated=True)
+
+
+@pytest.mark.parametrize("zarr_format", [3, 2])
+def test_consolidated_metadata_is_never_used(tmp_path, zarr_format):
     """check_zarr_store reads the per-array metadata, so the store is opened with consolidated=False."""
     folder = tmp_path / "u"
     grid_map(tmp_path).unpack(folder)
     store = folder / "spectra.zarr"
-    if (store / "zarr.json").exists():  # zarr 3 (Python 3.11 and later): consolidated copy in the root zarr.json
+    if zarr_format == 3:  # what unpack writes: the consolidated copy is in the root zarr.json
         root_meta = store / "zarr.json"
         content = json.loads(root_meta.read_text())
         content["consolidated_metadata"]["metadata"]["spectra"]["codecs"].append({"name": "numcodecs.pickle"})
-    else:  # zarr 2 (Python 3.10): consolidated copy in .zmetadata
+    else:  # what 1.1 wrote on Python 3.10: the consolidated copy is in .zmetadata
+        rewrite_as_zarr_format_2(store)
+        assert not (store / "zarr.json").exists()
         root_meta = store / ".zmetadata"
         content = json.loads(root_meta.read_text())
         content["metadata"]["spectra/.zarray"]["filters"] = [{"id": "pickle"}]

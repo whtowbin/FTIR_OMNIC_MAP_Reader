@@ -1,6 +1,6 @@
 # Installation
 
-ftir-OMNIC-map-reader needs Python 3.10 or newer (3.10 to 3.14 are tested). It is a pure Python package.
+ftir-OMNIC-map-reader needs Python 3.11 or newer (3.11 to 3.14 are tested). It is a pure Python package.
 
 ```console
 pip install ftir-OMNIC-map-reader

@@ -15,6 +15,7 @@ dist/
 
 # Local session handoff notes (not for users)
 /HANDOFF.md
+/dev-notes/
 
 # Hypothesis example database
 .hypothesis/

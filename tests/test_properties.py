@@ -203,6 +203,8 @@ def test_csv_file_written_and_read_back_gives_the_escaped_cell(tmp_path_factory,
     width=st.integers(1, 5000),
     height=st.integers(1, 5000),
 )
+# ymin + height_um rounds at 16384: the extent is 0.0999999999985 high, not 0.1
+@example(xmin=0.0, width_um=1.0, ymin=16384.0, height_um=0.1, width=1, height=1)
 def test_world_file_text_inverts_to_the_extent(xmin, width_um, ymin, height_um, width, height):
     extent = (xmin, xmin + width_um, ymin, ymin + height_um)
     pixel_x, _, _, minus_pixel_y, x_centre, y_centre = (
@@ -215,7 +217,9 @@ def test_world_file_text_inverts_to_the_extent(xmin, width_um, ymin, height_um, 
     # size each, the count scales the error): at most 5e-12 (|centre| + 1.5 size), and size <= 2 max|coordinate|.
     scale = max(abs(v) for v in extent)
     np.testing.assert_allclose(back, extent, rtol=5e-12, atol=2e-11 * scale)
-    assert (pixel_x, -minus_pixel_y) == pytest.approx((width_um / width, height_um / height), rel=5e-12)
+    # the pixel size of the extent as passed: ymin + height_um has already rounded, so height_um is not its height
+    size = ((extent[1] - extent[0]) / width, (extent[3] - extent[2]) / height)
+    assert (pixel_x, -minus_pixel_y) == pytest.approx(size, rel=5e-12)
 
 
 # ------------------------------------------------------------------ Zarr

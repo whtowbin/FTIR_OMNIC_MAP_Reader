@@ -337,7 +337,7 @@ def unpack_map(
         "format": FORMAT_NAME,
         "format_version": FORMAT_VERSION,
         "reader_version": reader_version(),
-        "unpacked_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "unpacked_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "source": {
             "file_name": m.path.name,
             "path": str(m.path),

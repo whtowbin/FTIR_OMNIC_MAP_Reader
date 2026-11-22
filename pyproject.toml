@@ -7,7 +7,7 @@ name = "ftir-OMNIC-map-reader"
 version = "1.1.1"
 description = "Load Thermo OMNIC .map FTIR files into Python as xarray datasets"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 keywords = ["FTIR", "Hyperspectral", "OMNIC", "Thermo", "spectroscopy", "xarray"]
 classifiers = [
@@ -16,7 +16,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -32,8 +31,10 @@ dependencies = [
     "numpy >= 1.26",
     "pandas>=2",
     "pillow>=10",
-    "xarray>=2024.6",
-    "zarr>=2.18",  # zarr 2.18 on Python 3.10, zarr 3 from 3.11: the spectra.zarr of an unpacked map
+    "xarray>=2025.6.1",  # older xarray cannot write the stores of zarr 3.1
+    # spectra.zarr of an unpacked map; zarr 3 still reads the format-2 stores zarr 2 wrote. zarr 3.1.1 and older do
+    # not write a chunk that compares equal to the fill value 0, so -0.0 comes back as +0.0.
+    "zarr>=3.1.2",
 ]
 
 [project.optional-dependencies]

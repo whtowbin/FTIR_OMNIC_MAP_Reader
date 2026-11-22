@@ -164,7 +164,7 @@ def _write_catalog(project_dir: Path, rows: list[Row]) -> None:
         "format": PROJECT_FORMAT,
         "format_version": PROJECT_VERSION,
         "reader_version": reader_version(),
-        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "updated_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "maps": rows,
     }
     write_json(project_dir / CATALOG_JSON, content)
