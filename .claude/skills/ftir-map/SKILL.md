@@ -5,7 +5,7 @@ description: Use when reading or exporting Thermo OMNIC .map files (FTIR microsc
 
 # Working with OMNIC .map files through `ftir_map`
 
-`ftir-OMNIC-map-reader` (PyPI; import `ftir_map`; Python 3.10+) reads Thermo OMNIC `.map` files without OMNIC. This
+`ftir-OMNIC-map-reader` (PyPI; import `ftir_map`; Python 3.11+) reads Thermo OMNIC `.map` files without OMNIC. This
 skill covers the package API, not spectroscopy (baselines, band assignment, thickness): decide those separately.
 Full docs: https://ftir-omnic-map-reader.readthedocs.io/
 

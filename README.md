@@ -18,7 +18,7 @@ documentation has every option, the output formats, worked examples and the Pyth
 pip install ftir-OMNIC-map-reader
 ```
 
-With [uv](https://docs.astral.sh/uv/): `uv add ftir-OMNIC-map-reader`. Python 3.10 or newer. Optional extras add YAML
+With [uv](https://docs.astral.sh/uv/): `uv add ftir-OMNIC-map-reader`. Python 3.11 or newer. Optional extras add YAML
 metadata, Parquet tables and netCDF export; see
 [Installation](https://ftir-omnic-map-reader.readthedocs.io/en/latest/installation/).
 

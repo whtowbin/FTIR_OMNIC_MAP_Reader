@@ -49,6 +49,7 @@ PyPI never accepts the same version twice. If a release is wrong, fix it and pub
 
 ## Notes
 
-- Python 3.10 reached end of life in October 2026. The floor stays at `>=3.10` for 1.1; raise it in a later release.
+- The floor is Python 3.11 from 1.2 (3.10 reached end of life in October 2026). pip on Python 3.10 keeps installing
+  1.1.1, the last release for it.
 - A trial run against TestPyPI needs a second trusted publisher on test.pypi.org and a copy of the workflow that
   sets `repository-url: https://test.pypi.org/legacy/`; this repository does not include one.

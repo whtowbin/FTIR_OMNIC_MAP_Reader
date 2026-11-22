@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- Python 3.11 or newer is required: Python 3.10 reached end of life in October 2026, and NumPy and zarr have dropped
+  it. pip on Python 3.10 keeps installing 1.1.1. Unpacked maps written on Python 3.10 (Zarr format 2, with
+  `.zmetadata`) are still read and checked.
+- zarr 3.1.2 and xarray 2025.6.1 are the minimum versions (were zarr 2.18 and xarray 2024.6). zarr 3.1.1 and older
+  skip writing a chunk that compares equal to the fill value 0, so a spectrum of zeros came back with +0.0 where it
+  held -0.0; xarray before 2025.6 cannot write zarr 3.1 stores. The test suite passes at these minimum versions.
+
 ### Fixed
 
 - `read_unpacked` gave back the wavenumbers of backgrounds of a map with a descending cm-1 axis off by up to 4.5e-13;
